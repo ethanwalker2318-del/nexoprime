@@ -34,7 +34,20 @@ export function WalletScreen() {
   const [wdAmount, setWdAmount] = useState("");
   const [wdError, setWdError] = useState("");
   const [wdSubmitting, setWdSubmitting] = useState(false);
-  const [activeDeposit, setActiveDeposit] = useState<DepositRecord | null>(null);
+  const [activeDepositId, setActiveDepositId] = useState<string | null>(null);
+
+  // Сбрасываем активный депозит при смене актива
+  function changeAsset(asset: string) {
+    setSelAsset(asset);
+    setActiveDepositId(null);
+    setWdAddress("");
+    setWdAmount("");
+    setWdError("");
+  }
+  // Всегда берём актуальные данные из стора (обновляется по мере подтверждений)
+  const activeDeposit = activeDepositId
+    ? (state.deposits.find(d => d.id === activeDepositId) ?? null)
+    : null;
   const [toast, setToast] = useState<string | null>(null);
   const [copiedAddr, setCopiedAddr] = useState(false);
 
@@ -45,7 +58,7 @@ export function WalletScreen() {
 
   function handleDeposit() {
     const dep = initiateDeposit(selAsset);
-    setActiveDeposit(dep);
+    setActiveDepositId(dep.id);
     showToast(`Адрес для пополнения ${selAsset} создан`);
   }
 
@@ -196,7 +209,7 @@ export function WalletScreen() {
               transition={{ duration: 0.18, ease: EASE }}
             >
               {/* Выбор актива */}
-              <AssetSelector assets={ASSETS} value={selAsset} onChange={setSelAsset} />
+              <AssetSelector assets={ASSETS} value={selAsset} onChange={changeAsset} />
 
               {/* Баланс */}
               <div style={{
@@ -308,7 +321,7 @@ export function WalletScreen() {
                 </div>
               ) : (
                 <>
-                  <AssetSelector assets={ASSETS} value={selAsset} onChange={setSelAsset} />
+                  <AssetSelector assets={ASSETS} value={selAsset} onChange={changeAsset} />
 
                   <div style={{
                     background: "var(--surface-2)", borderRadius: "var(--r-md)",

@@ -1,40 +1,63 @@
-﻿import { useState, useEffect, useCallback, useMemo } from "react";
+﻿import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useExchange } from "../../shared/store/exchangeStore";
-import { genOrderBook, getCandles } from "../../shared/store/mockEngine";
-import type { OrderBook, OrderBookLevel, Candle } from "../../shared/store/mockEngine";
-import type { OrderSide, OrderType, Order } from "../../shared/store/exchangeStore";
+import { useRouter } from "../../app/providers/RouterProvider";
+import { getCandles } from "../../shared/store/mockEngine";
+import type { Candle } from "../../shared/store/mockEngine";
+import type { BinaryDirection, BinaryOption, BinaryStatus } from "../../shared/store/exchangeStore";
+import { PAYOUT_RATE } from "../../shared/store/exchangeStore";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
 const PAIRS = ["BTC/USDT","ETH/USDT","SOL/USDT","BNB/USDT","XRP/USDT","ADA/USDT","DOGE/USDT","AVAX/USDT","LINK/USDT"];
-const TF_LABELS = ["1м","5м","15м","1ч","4ч","1д"];
-type BottomTab = "position" | "orders" | "history";
+const EXPIRY_OPTIONS = [
+  { label: "30с", ms: 30_000 },
+  { label: "1м",  ms: 60_000 },
+  { label: "5м",  ms: 300_000 },
+  { label: "15м", ms: 900_000 },
+  { label: "30м", ms: 1_800_000 },
+  { label: "1ч",  ms: 3_600_000 },
+];
+const TF_CHART = "1м";
+const STAKE_PRESETS = [10, 25, 50, 100];
+type BottomTab = "active" | "history";
 
 function fmtPrice(n: number): string {
   if (n >= 10000) return n.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
   if (n >= 1)     return n.toFixed(2);
   return n.toPrecision(4);
 }
-function fmtSize(n: number): string {
-  if (n >= 1000) return n.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
-  if (n >= 1)    return n.toFixed(3);
-  return n.toPrecision(3);
-}
 function fmtPnl(n: number): string {
-  return `${n >= 0 ? "+" : ""}$${Math.abs(n).toFixed(2)}`;
+  return `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
+}
+function fmtMs(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m > 0 ? `${m}:${String(sec).padStart(2, "0")}` : `${sec}с`;
+}
+function fmtTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function statusLabel(s: BinaryStatus): string {
+  return s === "active" ? "ктивен" : s === "won" ? "ыигрыш" : s === "lost" ? "роигрыш" : "ичья";
+}
+function statusColor(s: BinaryStatus): string {
+  return s === "won" ? "var(--pos)" : s === "lost" ? "var(--neg)" : s === "active" ? "var(--accent)" : "var(--text-4)";
 }
 
-// ─── SVG Candle Chart OHLC ───────────────────────────────────────────────────
-function CandleChart({ candles, currentPrice, change }: {
+// ─── SVG Candle Chart ────────────────────────────────────────────────────────
+function CandleChart({ candles, currentPrice, change, expiryLine }: {
   candles: Candle[];
   currentPrice: number;
   change: number;
+  expiryLine?: number | null;
 }) {
-  const W = 360, H = 160;
+  const W = 360, H = 180;
   if (candles.length < 2) {
     return (
       <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-0)" }}>
-        <span style={{ fontSize: 12, color: "var(--text-4)" }}>Загрузка...</span>
+        <span style={{ fontSize: 12, color: "var(--text-4)" }}>агрузка...</span>
       </div>
     );
   }
@@ -54,6 +77,7 @@ function CandleChart({ candles, currentPrice, change }: {
   const isPos = change >= 0;
   const curY = toY(currentPrice);
   const lastCandle = displayed[displayed.length - 1]!;
+  const expiryY = expiryLine != null ? toY(expiryLine) : null;
 
   return (
     <div style={{ position: "relative", width: "100%", background: "var(--bg-0)" }}>
@@ -79,8 +103,14 @@ function CandleChart({ candles, currentPrice, change }: {
             </g>
           );
         })}
+        {/* Текущая цена */}
         <line x1={0} y1={curY} x2={W} y2={curY}
           stroke={isPos ? "var(--pos)" : "var(--neg)"} strokeWidth="0.8" strokeDasharray="4 4" opacity="0.55" />
+        {/* ена входа опциона */}
+        {expiryY != null && (
+          <line x1={0} y1={expiryY} x2={W} y2={expiryY}
+            stroke="rgba(255,200,0,0.7)" strokeWidth="1" strokeDasharray="6 3" />
+        )}
       </svg>
       <div style={{ position:"absolute", top:4, left:6, fontSize:9, color:"var(--text-4)", fontVariantNumeric:"tabular-nums" }}>
         {fmtPrice(max - pad)}
@@ -107,237 +137,221 @@ function CandleChart({ candles, currentPrice, change }: {
   );
 }
 
-// ─── Строка стакана ───────────────────────────────────────────────────────────
-function BookRow({ level, side, maxTotal }: { level: OrderBookLevel; side: "bid"|"ask"; maxTotal: number }) {
-  const pct = (level.total / maxTotal) * 100;
+// ─── арточка активного опциона ───────────────────────────────────────────────
+function ActiveOptionCard({ option, currentPrice }: { option: BinaryOption; currentPrice: number }) {
+  const [remaining, setRemaining] = useState(option.expiresAt - Date.now());
+
+  useEffect(() => {
+    const iv = setInterval(() => setRemaining(option.expiresAt - Date.now()), 250);
+    return () => clearInterval(iv);
+  }, [option.expiresAt]);
+
+  const isCall  = option.direction === "call";
+  const winning = isCall ? currentPrice > option.openPrice : currentPrice < option.openPrice;
+  const pnlNow  = winning ? option.stake * PAYOUT_RATE : -option.stake * PAYOUT_RATE;
+  const pct     = Math.max(0, Math.min(100, (remaining / option.expiryMs) * 100));
+
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 10px",
-      position: "relative", overflow: "hidden", fontSize: 11 }}>
-      <div style={{
-        position: "absolute", top: 0, bottom: 0, right: 0, width: `${pct}%`,
-        background: side === "ask" ? "var(--neg-dim)" : "var(--pos-dim)", pointerEvents: "none",
-      }} />
-      <span style={{ color: side === "ask" ? "var(--neg)" : "var(--pos)", fontWeight: 500, position: "relative", fontVariantNumeric: "tabular-nums" }}>
-        {fmtPrice(level.price)}
-      </span>
-      <span style={{ color: "var(--text-3)", position: "relative" }}>{fmtSize(level.size)}</span>
+    <div style={{
+      background: "var(--surface-1)", border: `1px solid ${winning ? "var(--pos-border)" : "var(--neg-border)"}`,
+      borderRadius: "var(--r-md)", padding: "10px 12px", marginBottom: 8,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{
+            fontSize: 12, fontWeight: 700, padding: "2px 8px", borderRadius: 5,
+            background: isCall ? "var(--pos-dim)" : "var(--neg-dim)",
+            color: isCall ? "var(--pos)" : "var(--neg)",
+            border: `1px solid ${isCall ? "var(--pos-border)" : "var(--neg-border)"}`,
+          }}>
+            {isCall ? "▲ CALL" : "▼ PUT"}
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-1)" }}>{option.symbol}</span>
+        </div>
+        <span style={{ fontSize: 14, fontWeight: 800, color: winning ? "var(--pos)" : "var(--neg)", fontVariantNumeric: "tabular-nums" }}>
+          {fmtMs(remaining)}
+        </span>
+      </div>
+      {/* прогресс */}
+      <div style={{ height: 3, background: "var(--surface-3)", borderRadius: 2, overflow: "hidden", marginBottom: 8 }}>
+        <div style={{
+          height: "100%", width: `${pct}%`,
+          background: winning ? "var(--pos)" : "var(--neg)",
+          borderRadius: 2, transition: "width 0.25s linear",
+        }} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "2px 8px", fontSize: 11 }}>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-4)" }}>Ставка</div>
+          <div style={{ fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>${option.stake.toFixed(2)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-4)" }}>ена входа</div>
+          <div style={{ fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>{fmtPrice(option.openPrice)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-4)" }}>P&L сейчас</div>
+          <div style={{ fontWeight: 700, color: winning ? "var(--pos)" : "var(--neg)", fontVariantNumeric: "tabular-nums" }}>
+            {fmtPnl(pnlNow)}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-// ─── Карточка ордера ──────────────────────────────────────────────────────────
-function OrderRow({ order, currentPrice, onCancel }: {
-  order: Order; currentPrice: number; onCancel?: () => void;
-}) {
-  const isOpen   = ["pending","queued","partial"].includes(order.status);
-  const isFilled = order.status === "filled";
-  let pnl = 0, pnlPct = 0;
-  if (isFilled && order.filledQty > 0 && order.price > 0) {
-    pnl    = order.side === "buy"
-      ? (currentPrice - order.price) * order.filledQty
-      : (order.price - currentPrice) * order.filledQty;
-    pnlPct = (pnl / (order.price * order.filledQty)) * 100;
-  }
-  const statusColor: Record<string, string> = {
-    pending:"var(--warn)", queued:"var(--warn)", partial:"var(--accent)",
-    filled:"var(--pos)", cancelled:"var(--text-4)", rejected:"var(--neg)",
-  };
-  const statusLabel: Record<string, string> = {
-    pending:"Ожидание", queued:"В очереди", partial:"Частично",
-    filled:"Исполнен", cancelled:"Отменён", rejected:"Отклонён",
-  };
-  const base = order.symbol.split("/")[0] ?? "";
-  const fillPct = order.qty > 0 ? (order.filledQty / order.qty) * 100 : 0;
-
+// ─── арточка истории опциона ─────────────────────────────────────────────────
+function HistoryOptionCard({ option }: { option: BinaryOption }) {
+  const isCall = option.direction === "call";
   return (
     <div style={{
       background: "var(--surface-1)", border: "1px solid var(--line-1)",
       borderRadius: "var(--r-md)", padding: "10px 12px", marginBottom: 8,
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{
-            fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
-            background: order.side === "buy" ? "var(--pos-dim)" : "var(--neg-dim)",
-            color: order.side === "buy" ? "var(--pos)" : "var(--neg)",
-            border: `1px solid ${order.side === "buy" ? "var(--pos-border)" : "var(--neg-border)"}`,
+            fontSize: 12, fontWeight: 700, padding: "2px 8px", borderRadius: 5,
+            background: isCall ? "var(--pos-dim)" : "var(--neg-dim)",
+            color: isCall ? "var(--pos)" : "var(--neg)",
+            border: `1px solid ${isCall ? "var(--pos-border)" : "var(--neg-border)"}`,
           }}>
-            {order.side === "buy" ? "Покупка" : "Продажа"}
+            {isCall ? "▲ CALL" : "▼ PUT"}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-1)" }}>{order.symbol}</span>
-          <span style={{ fontSize: 10, color: "var(--text-4)" }}>
-            {order.type === "market" ? "Рынок" : "Лимит"}
-          </span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-1)" }}>{option.symbol}</span>
         </div>
-        <span style={{ fontSize: 10, fontWeight: 600, color: statusColor[order.status] ?? "var(--text-4)" }}>
-          {statusLabel[order.status] ?? order.status}
+        <span style={{
+          fontSize: 12, fontWeight: 700, padding: "2px 8px", borderRadius: 5,
+          color: statusColor(option.status),
+          background: option.status === "won" ? "var(--pos-dim)" : option.status === "lost" ? "var(--neg-dim)" : "var(--surface-2)",
+        }}>
+          {statusLabel(option.status)}
         </span>
       </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "4px 8px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "2px 8px", fontSize: 11 }}>
         <div>
-          <div style={{ fontSize: 9, color: "var(--text-4)", marginBottom: 2 }}>Цена входа</div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>
-            {fmtPrice(order.price)}
+          <div style={{ fontSize: 9, color: "var(--text-4)" }}>Ставка</div>
+          <div style={{ fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>${option.stake.toFixed(2)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-4)" }}>ход</div>
+          <div style={{ fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>{fmtPrice(option.openPrice)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-4)" }}>акрытие</div>
+          <div style={{ fontWeight: 600, color: "var(--text-3)", fontVariantNumeric: "tabular-nums" }}>
+            {option.closePrice != null ? fmtPrice(option.closePrice) : "—"}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 9, color: "var(--text-4)", marginBottom: 2 }}>Кол-во</div>
-          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-1)" }}>
-            {fmtSize(order.qty)} {base}
+          <div style={{ fontSize: 9, color: "var(--text-4)" }}>P&L</div>
+          <div style={{ fontWeight: 700, color: statusColor(option.status), fontVariantNumeric: "tabular-nums" }}>
+            {option.status !== "active" ? fmtPnl(option.pnl) : "—"}
           </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 9, color: "var(--text-4)", marginBottom: 2 }}>
-            {isFilled ? "P&L" : "Тек. цена"}
-          </div>
-          {isFilled ? (
-            <div style={{
-              fontSize: 12, fontWeight: 700,
-              color: pnl >= 0 ? "var(--pos)" : "var(--neg)",
-              fontVariantNumeric: "tabular-nums",
-            }}>
-              {fmtPnl(pnl)}
-              <span style={{ fontSize: 9, marginLeft: 3, opacity: 0.75 }}>
-                ({pnl >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
-              </span>
-            </div>
-          ) : (
-            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-2)", fontVariantNumeric: "tabular-nums" }}>
-              {fmtPrice(currentPrice)}
-            </div>
-          )}
         </div>
       </div>
-
-      {/* Прогресс-бар */}
-      <div style={{ marginTop: 8 }}>
-        <div style={{ height: 3, background: "var(--surface-3)", borderRadius: 2, overflow: "hidden" }}>
-          <div style={{
-            height: "100%", width: `${fillPct}%`,
-            background: order.side === "buy" ? "var(--pos)" : "var(--neg)",
-            borderRadius: 2, transition: "width 0.5s ease",
-          }} />
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
-          <span style={{ fontSize: 9, color: "var(--text-4)" }}>
-            Исполнено {fmtSize(order.filledQty)} / {fmtSize(order.qty)} {base}
-          </span>
-          <span style={{ fontSize: 9, color: "var(--text-4)" }}>
-            Fee ${order.fee.toFixed(4)}
-          </span>
-        </div>
-      </div>
-
-      {isOpen && onCancel && (
-        <button onClick={onCancel} style={{
-          marginTop: 8, width: "100%", padding: "6px",
-          background: "transparent", border: "1px solid var(--neg-border)",
-          borderRadius: "var(--r-sm)", color: "var(--neg)",
-          fontSize: 11, fontWeight: 600, cursor: "pointer",
-        }}>
-          Отменить ордер
-        </button>
-      )}
+      <div style={{ marginTop: 4, fontSize: 9, color: "var(--text-4)" }}>{fmtTime(option.createdAt)}</div>
     </div>
   );
 }
 
-// ─── Основной экран ──────────────────────────────────────────────────────────
-const inputSt: React.CSSProperties = {
-  width: "100%", padding: "8px 10px",
-  background: "var(--surface-2)", border: "1px solid var(--line-2)",
-  borderRadius: "var(--r-sm)", color: "var(--text-1)",
-  fontSize: 13, outline: "none", boxSizing: "border-box",
-};
+// ─── Статистика опционов ──────────────────────────────────────────────────────
+function HistoryStats({ options }: { options: BinaryOption[] }) {
+  const closed = options.filter(o => o.status !== "active");
+  if (closed.length === 0) return null;
+  const wins    = closed.filter(o => o.status === "won").length;
+  const totalPnl = closed.reduce((s, o) => s + o.pnl, 0);
+  const winRate = (wins / closed.length) * 100;
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
+      background: "var(--surface-1)", border: "1px solid var(--line-1)",
+      borderRadius: "var(--r-md)", padding: "10px 12px", marginBottom: 10, gap: 4,
+    }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 9, color: "var(--text-4)", marginBottom: 2 }}>обед</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--pos)" }}>{winRate.toFixed(0)}%</div>
+        <div style={{ fontSize: 9, color: "var(--text-4)" }}>{wins}/{closed.length}</div>
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 9, color: "var(--text-4)", marginBottom: 2 }}>сего P&L</div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: totalPnl >= 0 ? "var(--pos)" : "var(--neg)", fontVariantNumeric: "tabular-nums" }}>
+          {fmtPnl(totalPnl)}
+        </div>
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 9, color: "var(--text-4)", marginBottom: 2 }}>Сделок</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-1)" }}>{closed.length}</div>
+      </div>
+    </div>
+  );
+}
 
+// ─── сновной экран ───────────────────────────────────────────────────────────
 export function TradeScreen() {
-  const { state, placeOrder, cancelOrder, closePosition, unrealizedPnl } = useExchange();
-  const [pair, setPair]             = useState("BTC/USDT");
-  const [side, setSide]             = useState<OrderSide>("buy");
-  const [orderType, setOrderType]   = useState<OrderType>("market");
-  const [qty, setQty]               = useState("");
-  const [limitPrice, setLimitPrice] = useState("");
-  const [tfLabel, setTfLabel]       = useState("15м");
-  const [orderBook, setOrderBook]   = useState<OrderBook>(() => genOrderBook(pair));
-  const [candles, setCandles]       = useState<Candle[]>(() => getCandles(pair, "15м"));
+  const { state, placeBinary } = useExchange();
+  const { tradePair } = useRouter();
+
+  const [pair,       setPair]       = useState(() => tradePair ?? "BTC/USDT");
+  const [direction,  setDirection]  = useState<BinaryDirection>("call");
+  const [stake,      setStake]      = useState("10");
+  const [expiryIdx,  setExpiryIdx]  = useState(1);   // "1м" default
+  const [candles,    setCandles]    = useState<Candle[]>(() => getCandles(pair, TF_CHART));
   const [showPicker, setShowPicker] = useState(false);
-  const [confirmSheet, setConfirm]  = useState<null|{preview:string;fee:string;total:string}>(null);
-  const [toast, setToast]           = useState<{msg:string;ok:boolean}|null>(null);
-  const [bottomTab, setBottomTab]   = useState<BottomTab>("position");
+  const [toast,      setToast]      = useState<{msg:string;ok:boolean}|null>(null);
+  const [bottomTab,  setBottomTab]  = useState<BottomTab>("active");
 
-  const tk                           = state.tickers[pair];
-  const [base="", quote="USDT"]      = pair.split("/");
-  const baseAsset                    = state.assets[base];
-  const quoteAsset                   = state.assets[quote ?? "USDT"];
+  const tk = state.tickers[pair];
+  const usdt = state.assets["USDT"];
 
+  // Синхронизируем пару при переходе с экрана ынки
+  useEffect(() => { if (tradePair) setPair(tradePair); }, [tradePair]);
+
+  // бновляем свечи
   useEffect(() => {
-    setOrderBook(genOrderBook(pair));
-    setCandles(getCandles(pair, tfLabel));
-    const iv = setInterval(() => {
-      setOrderBook(genOrderBook(pair));
-      setCandles(getCandles(pair, tfLabel));
-    }, 1200);
+    setCandles(getCandles(pair, TF_CHART));
+    const iv = setInterval(() => setCandles(getCandles(pair, TF_CHART)), 1000);
     return () => clearInterval(iv);
-  }, [pair, tfLabel]);
-
-  useEffect(() => { setLimitPrice(""); setQty(""); }, [pair]);
+  }, [pair]);
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 2500);
   }
 
-  const execPrice = orderType === "market"
-    ? (side === "buy" ? (tk?.ask ?? 0) : (tk?.bid ?? 0))
-    : parseFloat(limitPrice || "0");
-  const feeRate  = orderType === "market" ? 0.001 : 0.0006;
-  const estFee   = parseFloat(qty || "0") * execPrice * feeRate;
-  const estTotal = parseFloat(qty || "0") * execPrice;
-
-  function handlePreview() {
-    if (!qty || parseFloat(qty) <= 0) { showToast("Укажите количество", false); return; }
-    if (orderType === "limit" && parseFloat(limitPrice || "0") <= 0) {
-      showToast("Укажите цену", false); return;
-    }
-    setConfirm({
-      preview: `${side === "buy" ? "Купить" : "Продать"} ${qty} ${base}`,
-      fee:   `≈$${estFee.toFixed(4)} (${(feeRate*100).toFixed(2)}%)`,
-      total: `≈$${estTotal.toFixed(2)}`,
-    });
-  }
-
-  function handleConfirm() {
-    setConfirm(null);
-    const r = placeOrder(pair, side, orderType, parseFloat(qty), parseFloat(limitPrice) || undefined);
+  function handlePlace() {
+    const s = parseFloat(stake);
+    if (!s || s <= 0) { showToast("кажите ставку", false); return; }
+    const exp = EXPIRY_OPTIONS[expiryIdx]!;
+    const r = placeBinary(pair, direction, s, exp.ms);
     if (r.ok) {
-      showToast("Ордер размещён", true);
-      setQty("");
-      setBottomTab("orders");
+      showToast(`${direction === "call" ? "▲ CALL" : "▼ PUT"} размещён на ${exp.label}`, true);
+      setBottomTab("active");
     } else {
-      showToast(r.error ?? "Ошибка", false);
+      showToast(r.error ?? "шибка", false);
     }
   }
 
-  const pctOfBalance = useCallback((pct: number) => {
-    if (side === "buy" && quoteAsset && execPrice > 0) {
-      setQty(((quoteAsset.available * pct) / execPrice).toPrecision(4));
-    } else if (side === "sell" && baseAsset) {
-      setQty((baseAsset.available * pct).toPrecision(4));
-    }
-  }, [side, quoteAsset, baseAsset, execPrice]);
+  const stakeNum = parseFloat(stake) || 0;
+  const payout   = stakeNum * PAYOUT_RATE;
+  const expLabel = EXPIRY_OPTIONS[expiryIdx]?.label ?? "1м";
 
-  const pairOrders    = useMemo(() => state.orders.filter(o => o.symbol === pair), [state.orders, pair]);
-  const openOrders    = pairOrders.filter(o => ["pending","queued","partial"].includes(o.status));
-  const historyOrders = pairOrders.filter(o => ["filled","cancelled","rejected"].includes(o.status));
-  const myAssets      = Object.values(state.assets).filter(a => a.symbol !== "USDT" && (a.available + a.locked) > 0.000001);
+  const pairOptions = useMemo(
+    () => state.binaryOptions.filter(o => o.symbol === pair),
+    [state.binaryOptions, pair],
+  );
+  const activeOptions  = pairOptions.filter(o => o.status === "active");
+  const historyOptions = pairOptions.filter(o => o.status !== "active").slice().reverse();
+
+  // лижайший активный опцион — рисуем линию цены входа на чарте
+  const firstActive = activeOptions[0];
+  const entryLine   = firstActive?.openPrice ?? null;
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
     flex: 1, padding: "8px 0", background: "transparent", border: "none",
     borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
     color: active ? "var(--accent)" : "var(--text-3)",
     fontSize: 11, fontWeight: active ? 600 : 400, cursor: "pointer",
-    transition: "color var(--dur-fast), border-color var(--dur-fast)",
   });
 
   return (
@@ -373,11 +387,11 @@ export function TradeScreen() {
         {tk && (
           <div style={{ display: "flex", gap: 14, paddingBottom: 8, overflowX: "auto" }}>
             {[
-              { label: "24ч Макс", val: fmtPrice(tk.high24h), c: "var(--pos)" },
-              { label: "24ч Мин",  val: fmtPrice(tk.low24h),  c: "var(--neg)" },
+              { label: "24ч акс", val: fmtPrice(tk.high24h), c: "var(--pos)" },
+              { label: "24ч ин",  val: fmtPrice(tk.low24h),  c: "var(--neg)" },
               { label: "Bid",      val: fmtPrice(tk.bid),      c: "var(--pos)" },
               { label: "Ask",      val: fmtPrice(tk.ask),      c: "var(--neg)" },
-              { label: "Объём",    val: `$${(tk.vol24h/1e6).toFixed(0)}M` },
+              { label: "аланс",   val: `$${(usdt?.available ?? 0).toFixed(2)}` },
             ].map(s => (
               <div key={s.label} style={{ flexShrink: 0 }}>
                 <div style={{ fontSize: 9, color: "var(--text-4)", marginBottom: 1 }}>{s.label}</div>
@@ -391,137 +405,124 @@ export function TradeScreen() {
       {/* ── Скроллируемое тело ── */}
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
 
-        {/* TF выбор */}
-        <div style={{ display: "flex", gap: 2, padding: "6px 10px 4px", background: "var(--bg-0)", borderBottom: "1px solid var(--line-1)" }}>
-          {TF_LABELS.map(tf => (
-            <button key={tf} onClick={() => setTfLabel(tf)} style={{
-              padding: "3px 7px", borderRadius: 5, fontSize: 11, fontWeight: 500, cursor: "pointer",
-              background: tfLabel === tf ? "var(--accent-dim)" : "transparent",
-              border: tfLabel === tf ? "1px solid var(--accent-border)" : "1px solid transparent",
-              color: tfLabel === tf ? "var(--accent)" : "var(--text-4)",
-            }}>
-              {tf}
-            </button>
-          ))}
-        </div>
-
         {/* Свечной OHLC-чарт */}
-        <CandleChart candles={candles} currentPrice={tk?.price ?? 0} change={tk?.change24h ?? 0} />
+        <CandleChart candles={candles} currentPrice={tk?.price ?? 0} change={tk?.change24h ?? 0} expiryLine={entryLine} />
 
-        {/* ── Стакан + Тикет side-by-side ── */}
-        <div style={{ display: "flex", borderTop: "1px solid var(--line-1)", background: "var(--bg-0)" }}>
+        {/* ── анель торговли ── */}
+        <div style={{ background: "var(--bg-0)", borderTop: "1px solid var(--line-1)", padding: "12px" }}>
 
-          {/* Стакан (45%) */}
-          <div style={{ width: "45%", borderRight: "1px solid var(--line-1)" }}>
-            <div style={{ padding: "4px 8px", fontSize: 9, color: "var(--text-4)", display: "flex", justifyContent: "space-between", background: "var(--surface-1)", borderBottom: "1px solid var(--line-1)" }}>
-              <span>Цена</span><span>Кол-во</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column-reverse" }}>
-              {orderBook.asks.slice(0, 8).map((l, i) => (
-                <BookRow key={i} level={l} side="ask" maxTotal={orderBook.asks[7]?.total ?? 1} />
-              ))}
-            </div>
-            {tk && (
-              <div style={{ padding: "3px 8px", background: "var(--surface-2)", borderTop: "1px solid var(--line-1)", borderBottom: "1px solid var(--line-1)" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: tk.change24h >= 0 ? "var(--pos)" : "var(--neg)", fontVariantNumeric: "tabular-nums" }}>
-                  {fmtPrice(tk.price)}
-                </span>
-              </div>
-            )}
-            <div>
-              {orderBook.bids.slice(0, 8).map((l, i) => (
-                <BookRow key={i} level={l} side="bid" maxTotal={orderBook.bids[7]?.total ?? 1} />
+          {/* CALL / PUT */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+            {(["call","put"] as BinaryDirection[]).map(d => (
+              <button key={d} onClick={() => setDirection(d)} style={{
+                padding: "14px 0", borderRadius: "var(--r-md)", cursor: "pointer",
+                background: direction === d
+                  ? (d === "call" ? "linear-gradient(135deg,#31D0AA,#2aaf91)" : "linear-gradient(135deg,#FF5B6E,#d94456)")
+                  : (d === "call" ? "var(--pos-dim)" : "var(--neg-dim)"),
+                color: direction === d ? "#fff" : (d === "call" ? "var(--pos)" : "var(--neg)"),
+                fontSize: 16, fontWeight: 800,
+                border: `1.5px solid ${d === "call" ? "var(--pos-border)" : "var(--neg-border)"}`,
+                boxShadow: direction === d
+                  ? (d === "call" ? "0 4px 16px rgba(49,208,170,0.35)" : "0 4px 16px rgba(255,91,110,0.35)")
+                  : "none",
+                transition: "all 0.15s ease",
+              } as React.CSSProperties}>
+                {d === "call" ? "▲  CALL" : "▼  PUT"}
+              </button>
+            ))}
+          </div>
+
+          {/* кспирация */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 5 }}>СЯ</div>
+            <div style={{ display: "flex", gap: 5 }}>
+              {EXPIRY_OPTIONS.map((e, i) => (
+                <button key={e.label} onClick={() => setExpiryIdx(i)} style={{
+                  flex: 1, padding: "5px 0", borderRadius: 6, cursor: "pointer",
+                  background: expiryIdx === i ? "var(--accent-dim)" : "transparent",
+                  border: expiryIdx === i ? "1px solid var(--accent-border)" : "1px solid var(--line-1)",
+                  color: expiryIdx === i ? "var(--accent)" : "var(--text-4)",
+                  fontSize: 10.5, fontWeight: expiryIdx === i ? 700 : 400,
+                }}>
+                  {e.label}
+                </button>
               ))}
             </div>
           </div>
 
-          {/* Ордер-тикет (55%) */}
-          <div style={{ width: "55%", padding: "8px 10px", overflowY: "auto" }}>
-            {/* Buy / Sell */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--surface-2)", borderRadius: 8, padding: 2, marginBottom: 7, gap: 2 }}>
-              {(["buy","sell"] as OrderSide[]).map(s => (
-                <button key={s} onClick={() => setSide(s)} style={{
-                  padding: "7px 0", border: "none", borderRadius: 7, cursor: "pointer",
-                  background: side === s ? (s === "buy" ? "var(--pos)" : "var(--neg)") : "transparent",
-                  color: side === s ? "#fff" : "var(--text-3)",
-                  fontSize: 12, fontWeight: 700, transition: "all var(--dur-fast)",
+          {/* Ставка */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 5 }}>СТ (USDT)</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+              {STAKE_PRESETS.map(p => (
+                <button key={p} onClick={() => setStake(String(p))} style={{
+                  flex: 1, padding: "5px 0", borderRadius: 6, cursor: "pointer",
+                  background: parseFloat(stake) === p ? "var(--accent-dim)" : "var(--surface-2)",
+                  border: parseFloat(stake) === p ? "1px solid var(--accent-border)" : "1px solid var(--line-1)",
+                  color: parseFloat(stake) === p ? "var(--accent)" : "var(--text-3)",
+                  fontSize: 11, fontWeight: parseFloat(stake) === p ? 700 : 400,
                 }}>
-                  {s === "buy" ? "Купить" : "Продать"}
+                  ${p}
                 </button>
               ))}
             </div>
-            {/* Market / Limit */}
-            <div style={{ display: "flex", gap: 3, marginBottom: 7 }}>
-              {(["market","limit"] as OrderType[]).map(t => (
-                <button key={t} onClick={() => setOrderType(t)} style={{
-                  flex: 1, padding: "4px 0", borderRadius: 6, cursor: "pointer", fontSize: 10.5, fontWeight: 500,
-                  background: orderType === t ? "var(--accent-dim)" : "transparent",
-                  border: orderType === t ? "1px solid var(--accent-border)" : "1px solid transparent",
-                  color: orderType === t ? "var(--accent)" : "var(--text-3)",
-                }}>
-                  {t === "market" ? "Рынок" : "Лимит"}
-                </button>
-              ))}
-            </div>
-            {orderType === "limit" && (
-              <div style={{ marginBottom: 6 }}>
-                <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 3 }}>Цена ({quote})</div>
-                <input type="number" placeholder={tk ? fmtPrice(tk.price) : "0"}
-                  value={limitPrice} onChange={e => setLimitPrice(e.target.value)} style={inputSt} />
-              </div>
-            )}
-            <div style={{ marginBottom: 5 }}>
-              <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 3 }}>Кол-во ({base})</div>
-              <input type="number" placeholder="0.00"
-                value={qty} onChange={e => setQty(e.target.value)} style={inputSt} />
-            </div>
-            <div style={{ display: "flex", gap: 3, marginBottom: 6 }}>
-              {[0.25,0.5,0.75,1].map(p => (
-                <button key={p} onClick={() => pctOfBalance(p)} style={{
-                  flex: 1, padding: "3px 0", borderRadius: 5, cursor: "pointer",
-                  background: "var(--surface-2)", border: "1px solid var(--line-1)",
-                  color: "var(--text-3)", fontSize: 9.5,
-                }}>
-                  {(p*100).toFixed(0)}%
-                </button>
-              ))}
-            </div>
-            <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 7, fontVariantNumeric: "tabular-nums" }}>
-              {side === "buy"
-                ? `${(quoteAsset?.available ?? 0).toFixed(2)} ${quote}`
-                : `${(baseAsset?.available ?? 0).toPrecision(4)} ${base}`
-              }
-            </div>
-            {qty && parseFloat(qty) > 0 && (
-              <div style={{ background: "var(--surface-2)", borderRadius: 6, padding: "6px 8px", marginBottom: 7, fontSize: 10, border: "1px solid var(--line-1)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--text-4)" }}>Сумма</span>
-                  <span style={{ color: "var(--text-2)", fontVariantNumeric: "tabular-nums" }}>≈${estTotal.toFixed(2)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--text-4)" }}>Комиссия</span>
-                  <span style={{ color: "var(--text-4)", fontVariantNumeric: "tabular-nums" }}>≈${estFee.toFixed(4)}</span>
-                </div>
-              </div>
-            )}
-            <button onClick={handlePreview} style={{
-              width: "100%", padding: "10px", border: "none", borderRadius: "var(--r-md)",
-              color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
-              background: side === "buy" ? "linear-gradient(135deg,#31D0AA,#2aaf91)" : "linear-gradient(135deg,#FF5B6E,#d94456)",
-              boxShadow: side === "buy" ? "0 3px 12px rgba(49,208,170,0.28)" : "0 3px 12px rgba(255,91,110,0.28)",
+            <input
+              type="number"
+              placeholder="Своя сумма"
+              value={stake}
+              onChange={e => setStake(e.target.value)}
+              style={{
+                width: "100%", padding: "8px 10px",
+                background: "var(--surface-2)", border: "1px solid var(--line-2)",
+                borderRadius: "var(--r-sm)", color: "var(--text-1)",
+                fontSize: 13, outline: "none", boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          {/* нфо о выплате */}
+          {stakeNum > 0 && (
+            <div style={{
+              display: "flex", justifyContent: "space-between",
+              background: "var(--surface-2)", border: "1px solid var(--line-1)",
+              borderRadius: "var(--r-sm)", padding: "8px 12px", marginBottom: 12, fontSize: 11,
             }}>
-              {side === "buy" ? "▲ Купить" : "▼ Продать"}
-            </button>
-          </div>
+              <div>
+                <div style={{ fontSize: 9, color: "var(--text-4)" }}>Ставка</div>
+                <div style={{ fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>${stakeNum.toFixed(2)}</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: "var(--text-4)" }}>ыигрыш +{(PAYOUT_RATE * 100).toFixed(0)}%</div>
+                <div style={{ fontWeight: 700, color: "var(--pos)", fontVariantNumeric: "tabular-nums" }}>+${payout.toFixed(2)}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 9, color: "var(--text-4)" }}>роигрыш −{(PAYOUT_RATE * 100).toFixed(0)}%</div>
+                <div style={{ fontWeight: 700, color: "var(--neg)", fontVariantNumeric: "tabular-nums" }}>−${payout.toFixed(2)}</div>
+              </div>
+            </div>
+          )}
+
+          {/* нопка разместить */}
+          <button onClick={handlePlace} style={{
+            width: "100%", padding: "13px", border: "none", borderRadius: "var(--r-md)",
+            color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer",
+            background: direction === "call"
+              ? "linear-gradient(135deg,#31D0AA,#2aaf91)"
+              : "linear-gradient(135deg,#FF5B6E,#d94456)",
+            boxShadow: direction === "call"
+              ? "0 4px 20px rgba(49,208,170,0.35)"
+              : "0 4px 20px rgba(255,91,110,0.35)",
+          }}>
+            {direction === "call" ? `▲ CALL  ${expLabel}` : `▼ PUT  ${expLabel}`}
+          </button>
         </div>
 
-        {/* ── Нижние табы ── */}
+        {/* ── ижние табы ── */}
         <div style={{ borderTop: "1px solid var(--line-1)", background: "var(--bg-0)" }}>
           <div style={{ display: "flex", borderBottom: "1px solid var(--line-1)" }}>
             {([
-              { key: "position" as BottomTab, label: "Активы" },
-              { key: "orders"   as BottomTab, label: `Ордера${openOrders.length ? ` (${openOrders.length})` : ""}` },
-              { key: "history"  as BottomTab, label: "История" },
+              { key: "active"  as BottomTab, label: `ктивные${activeOptions.length ? ` (${activeOptions.length})` : ""}` },
+              { key: "history" as BottomTab, label: "стория" },
             ]).map(t => (
               <button key={t.key} onClick={() => setBottomTab(t.key)} style={tabStyle(bottomTab === t.key)}>
                 {t.label}
@@ -530,115 +531,32 @@ export function TradeScreen() {
           </div>
         </div>
 
-        {/* ── Активы с P&L ── */}
-        {bottomTab === "position" && (
+        {/* ── ктивные опционы ── */}
+        {bottomTab === "active" && (
           <div style={{ padding: "10px 12px", paddingBottom: "calc(10px + var(--nav-height) + var(--safe-bottom))" }}>
-            {quoteAsset && (
-              <div style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                background: "var(--surface-1)", borderRadius: "var(--r-md)", border: "1px solid var(--line-1)",
-                padding: "10px 12px", marginBottom: 8,
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ width:32, height:32, borderRadius:"50%", background:"rgba(49,208,170,0.12)", border:"1px solid rgba(49,208,170,0.3)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"var(--pos)" }}>$</div>
-                  <div>
-                    <div style={{ fontWeight:600, fontSize:13, color:"var(--text-1)" }}>USDT</div>
-                    <div style={{ fontSize:10, color:"var(--text-4)" }}>Свободно</div>
-                  </div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontWeight:700, fontSize:14, color:"var(--text-1)", fontVariantNumeric:"tabular-nums" }}>
-                    {quoteAsset.available.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}
-                  </div>
-                  {quoteAsset.locked > 0 && <div style={{ fontSize:10, color:"var(--text-4)" }}>заморожено {quoteAsset.locked.toFixed(2)}</div>}
-                </div>
+            {activeOptions.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-4)", fontSize: 13 }}>
+                ет активных опционов — сделайте первый CALL или PUT
               </div>
+            ) : (
+              activeOptions.map(o => (
+                <ActiveOptionCard key={o.id} option={o} currentPrice={tk?.price ?? 0} />
+              ))
             )}
-            {myAssets.length === 0 ? (
-              <div style={{ textAlign:"center", padding:"32px 0", color:"var(--text-4)", fontSize:13 }}>Нет активов — сделайте первую покупку</div>
-            ) : myAssets.map(asset => {
-              const sym  = asset.symbol;
-              const tkA  = state.tickers[`${sym}/USDT`];
-              const total = asset.available + asset.locked;
-              const { pnl, pct } = unrealizedPnl(`${sym}/USDT`);
-              const isPosP = pnl >= 0;
-              return (
-                <div key={sym} style={{ background:"var(--surface-1)", border:"1px solid var(--line-1)", borderRadius:"var(--r-md)", padding:"10px 12px", marginBottom:8 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      <div style={{ width:32, height:32, borderRadius:"50%", background:"var(--accent-dim)", border:"1px solid var(--accent-border)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"var(--accent)" }}>
-                        {sym.slice(0,2)}
-                      </div>
-                      <div>
-                        <div style={{ fontWeight:600, fontSize:13, color:"var(--text-1)" }}>{sym}</div>
-                        <div style={{ fontSize:10, color:"var(--text-4)", fontVariantNumeric:"tabular-nums" }}>Ср.цена ${fmtPrice(asset.avgBuyPrice)}</div>
-                      </div>
-                    </div>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ fontWeight:700, fontSize:13, color:"var(--text-1)", fontVariantNumeric:"tabular-nums" }}>{total.toPrecision(5)} {sym}</div>
-                      <div style={{ fontSize:11, color:"var(--text-3)", fontVariantNumeric:"tabular-nums" }}>≈${(total*(tkA?.price??0)).toFixed(2)}</div>
-                    </div>
-                  </div>
-                  {/* P&L */}
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
-                    background: isPosP ? "var(--pos-dim)" : "var(--neg-dim)",
-                    border:`1px solid ${isPosP ? "var(--pos-border)" : "var(--neg-border)"}`,
-                    borderRadius:"var(--r-sm)", padding:"6px 10px",
-                  }}>
-                    <div>
-                      <div style={{ fontSize:9, color:"var(--text-4)", marginBottom:1 }}>P&L (нереализованный)</div>
-                      <div style={{ fontSize:14, fontWeight:700, color: isPosP ? "var(--pos)" : "var(--neg)", fontVariantNumeric:"tabular-nums" }}>
-                        {fmtPnl(pnl)}
-                        <span style={{ fontSize:10, marginLeft:5, opacity:0.8 }}>({pct>=0?"+":""}{pct.toFixed(2)}%)</span>
-                      </div>
-                    </div>
-                    {asset.realizedPnl !== 0 && (
-                      <div style={{ textAlign:"right" }}>
-                        <div style={{ fontSize:9, color:"var(--text-4)" }}>Зафиксировано</div>
-                        <div style={{ fontSize:12, fontWeight:600, color: asset.realizedPnl>=0?"var(--pos)":"var(--neg)", fontVariantNumeric:"tabular-nums" }}>
-                          {fmtPnl(asset.realizedPnl)}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  {/* Кнопки */}
-                  <div style={{ display:"flex", gap:7, marginTop:8 }}>
-                    <button onClick={() => { setPair(`${sym}/USDT`); setSide("buy"); }} style={{
-                      flex:1, padding:"6px 0", borderRadius:"var(--r-sm)", cursor:"pointer",
-                      background:"var(--pos-dim)", border:"1px solid var(--pos-border)", color:"var(--pos)", fontSize:11, fontWeight:600,
-                    }}>+ Докупить</button>
-                    <button onClick={() => {
-                      const r = closePosition(`${sym}/USDT`);
-                      if (!r.ok) showToast(r.error ?? "Ошибка", false);
-                      else showToast(`${sym}: позиция закрывается...`, true);
-                    }} style={{
-                      flex:1, padding:"6px 0", borderRadius:"var(--r-sm)", cursor:"pointer",
-                      background:"var(--neg-dim)", border:"1px solid var(--neg-border)", color:"var(--neg)", fontSize:11, fontWeight:600,
-                    }}>Закрыть</button>
-                  </div>
-                </div>
-              );
-            })}
           </div>
         )}
 
-        {/* ── Открытые ордера ── */}
-        {bottomTab === "orders" && (
-          <div style={{ padding:"10px 12px", paddingBottom:"calc(10px + var(--nav-height) + var(--safe-bottom))" }}>
-            {openOrders.length === 0
-              ? <div style={{ textAlign:"center", padding:"32px 0", color:"var(--text-4)", fontSize:13 }}>Нет открытых ордеров</div>
-              : openOrders.map(o => <OrderRow key={o.id} order={o} currentPrice={tk?.price ?? 0} onCancel={() => cancelOrder(o.id)} />)
-            }
-          </div>
-        )}
-
-        {/* ── История ── */}
+        {/* ── стория ── */}
         {bottomTab === "history" && (
-          <div style={{ padding:"10px 12px", paddingBottom:"calc(10px + var(--nav-height) + var(--safe-bottom))" }}>
-            {historyOrders.length === 0
-              ? <div style={{ textAlign:"center", padding:"32px 0", color:"var(--text-4)", fontSize:13 }}>История пуста</div>
-              : historyOrders.map(o => <OrderRow key={o.id} order={o} currentPrice={tk?.price ?? 0} />)
-            }
+          <div style={{ padding: "10px 12px", paddingBottom: "calc(10px + var(--nav-height) + var(--safe-bottom))" }}>
+            <HistoryStats options={pairOptions} />
+            {historyOptions.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-4)", fontSize: 13 }}>
+                стория пуста
+              </div>
+            ) : (
+              historyOptions.map(o => <HistoryOptionCard key={o.id} option={o} />)
+            )}
           </div>
         )}
       </div>
@@ -654,7 +572,7 @@ export function TradeScreen() {
               transition={{duration:0.25, ease:EASE}} onClick={e=>e.stopPropagation()}
               style={{ width:"100%", background:"var(--surface-1)", borderRadius:"var(--r-lg) var(--r-lg) 0 0", padding:"16px 16px calc(20px + var(--safe-bottom))", maxHeight:"72vh", overflowY:"auto", boxShadow:"var(--shadow-sheet)" }}
             >
-              <h3 style={{ margin:"0 0 14px", fontSize:15, fontWeight:700, color:"var(--text-1)" }}>Выбор пары</h3>
+              <h3 style={{ margin:"0 0 14px", fontSize:15, fontWeight:700, color:"var(--text-1)" }}>ыбор пары</h3>
               {PAIRS.map(p => {
                 const t = state.tickers[p];
                 const active = p === pair;
@@ -682,52 +600,6 @@ export function TradeScreen() {
         )}
       </AnimatePresence>
 
-      {/* ── Confirm Sheet ── */}
-      <AnimatePresence>
-        {confirmSheet && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
-            style={{ position:"absolute", inset:0, background:"rgba(7,10,15,0.85)", backdropFilter:"blur(8px)", zIndex:60, display:"flex", alignItems:"flex-end" }}
-            onClick={() => setConfirm(null)}
-          >
-            <motion.div initial={{y:"100%"}} animate={{y:0}} exit={{y:"100%"}}
-              transition={{duration:0.25, ease:EASE}} onClick={e=>e.stopPropagation()}
-              style={{ width:"100%", background:"var(--surface-2)", borderRadius:"var(--r-lg) var(--r-lg) 0 0", padding:"18px 18px calc(22px + var(--safe-bottom))", boxShadow:"var(--shadow-sheet)" }}
-            >
-              <h3 style={{ margin:"0 0 14px", fontSize:15, fontWeight:700, color:"var(--text-1)" }}>Подтвердить ордер</h3>
-              <div style={{ marginBottom:16 }}>
-                {[
-                  { label:"Действие", val:confirmSheet.preview, accent:true },
-                  { label:"Тип", val: orderType==="market"?"По рынку":"Лимитный" },
-                  { label:"Пара", val:pair },
-                  ...(orderType==="limit" ? [{label:"Цена", val:`${limitPrice} ${quote}`}] : []),
-                  { label:"Комиссия", val:confirmSheet.fee },
-                  { label:"Итого", val:confirmSheet.total, bold:true },
-                ].map(row => (
-                  <div key={row.label} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid var(--line-1)", fontSize:12 }}>
-                    <span style={{ color:"var(--text-3)" }}>{row.label}</span>
-                    <span style={{
-                      color: (row as {accent?:boolean}).accent ? "var(--accent)" : "var(--text-1)",
-                      fontWeight: (row as {bold?:boolean}).bold || (row as {accent?:boolean}).accent ? 600 : 400,
-                    }}>{row.val}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ display:"flex", gap:10 }}>
-                <button onClick={() => setConfirm(null)} style={{
-                  flex:1, padding:"11px", background:"var(--surface-3)", border:"none",
-                  borderRadius:"var(--r-md)", color:"var(--text-2)", fontSize:13, fontWeight:600, cursor:"pointer",
-                }}>Отмена</button>
-                <button onClick={handleConfirm} style={{
-                  flex:2, padding:"11px", border:"none", borderRadius:"var(--r-md)",
-                  color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer",
-                  background: side==="buy" ? "linear-gradient(135deg,#31D0AA,#2aaf91)" : "linear-gradient(135deg,#FF5B6E,#d94456)",
-                }}>Подтвердить</button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* ── Toast ── */}
       <AnimatePresence>
         {toast && (
@@ -749,8 +621,3 @@ export function TradeScreen() {
     </div>
   );
 }
-
-
-
-
-

@@ -41,7 +41,7 @@ function MiniChart({ values, pos }: { values: number[]; pos: boolean }) {
 
 export function MarketsScreen() {
   const { state } = useExchange();
-  const { navigate } = useRouter();
+  const { navigateToTrade } = useRouter();
 
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("vol");
@@ -151,7 +151,7 @@ export function MarketsScreen() {
             key={tk.symbol}
             ticker={tk}
             index={i}
-            onClick={() => navigate("trade")}
+            onClick={() => navigateToTrade(tk.symbol)}
           />
         ))}
       </div>

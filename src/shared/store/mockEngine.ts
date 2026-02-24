@@ -234,7 +234,9 @@ function tick() {
     tk.history = [...tk.history.slice(-49), tk.price];
     tk.high24h = Math.max(tk.high24h, tk.price);
     tk.low24h  = Math.min(tk.low24h,  tk.price);
-    tk.change24h += rng(-0.03, 0.03);
+    // change24h вычисляем от самой старой точки истории (а не случайным дрейфом)
+    const refPrice = tk.history[0] ?? tk.price;
+    tk.change24h = refPrice > 0 ? ((tk.price - refPrice) / refPrice) * 100 : 0;
     tk.vol24h   *= 1 + rng(-0.001, 0.001);
     updateCandles(tk.symbol, tk.price, rng(0.01, 2));
   }

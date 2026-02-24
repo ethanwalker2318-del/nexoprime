@@ -25,6 +25,25 @@ export interface Order {
   updatedAt:  number;
 }
 
+// ─── Бинарный опцион ─────────────────────────────────────────────────────────
+export type BinaryDirection = "call" | "put";
+export type BinaryStatus    = "active" | "won" | "lost" | "draw";
+export const PAYOUT_RATE    = 0.8; // 80% выплата
+
+export interface BinaryOption {
+  id:          string;
+  symbol:      string;
+  direction:   BinaryDirection;
+  stake:       number;        // ставка в USDT
+  openPrice:   number;        // цена на момент открытия
+  closePrice?: number;        // цена на момент экспирации
+  expiryMs:    number;        // длительность, мс
+  expiresAt:   number;        // Unix-время экспирации
+  status:      BinaryStatus;
+  pnl:         number;        // итоговый PnL (0 пока активен)
+  createdAt:   number;
+}
+
 // Лог каждого фактического трейда (fill)
 export interface Trade {
   id:       string;
@@ -80,21 +99,41 @@ export interface User {
 // ─── State ───────────────────────────────────────────────────────────────────
 
 interface State {
-  user:        User | null;
-  assets:      Record<string, Asset>;
-  orders:      Order[];
-  trades:      Trade[];           // история исполнений
-  deposits:    DepositRecord[];
-  withdrawals: WithdrawRecord[];
-  tickers:     Record<string, Ticker>;
+  user:          User | null;
+  assets:        Record<string, Asset>;
+  orders:        Order[];
+  trades:        Trade[];           // история исполнений
+  deposits:      DepositRecord[];
+  withdrawals:   WithdrawRecord[];
+  tickers:       Record<string, Ticker>;
+  binaryOptions: BinaryOption[];    // бинарные опционы
 }
 
 function makeAsset(symbol: string, available = 0, locked = 0): Asset {
   return { symbol, available, locked, avgBuyPrice: 0, realizedPnl: 0, totalBought: 0 };
 }
 
+// ─── Персистентность пользователя ────────────────────────────────────────────
+const USER_KEY = "nexo_user_v1";
+
+function loadUser(): User | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveUser(user: User | null) {
+  try {
+    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+    else localStorage.removeItem(USER_KEY);
+  } catch { /* игнорируем */ }
+}
+
 const INITIAL_STATE: State = {
-  user: null,
+  user: loadUser(),
   assets: {
     USDT: { ...makeAsset("USDT", 10_000) },
     BTC:  { ...makeAsset("BTC",  0.025), avgBuyPrice: 62_000, totalBought: 0.025 },
@@ -102,11 +141,12 @@ const INITIAL_STATE: State = {
     SOL:  { ...makeAsset("SOL",  5),     avgBuyPrice: 160,    totalBought: 5     },
     BNB:  { ...makeAsset("BNB",  0) },
   },
-  orders:      [],
-  trades:      [],
-  deposits:    [],
-  withdrawals: [],
-  tickers:     {},
+  orders:        [],
+  trades:        [],
+  deposits:      [],
+  withdrawals:   [],
+  tickers:       {},
+  binaryOptions: [],
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -122,7 +162,9 @@ type Action =
   | { type: "UPDATE_DEPOSIT";    id: string; patch: Partial<DepositRecord> }
   | { type: "ADD_WITHDRAWAL";    withdrawal: WithdrawRecord }
   | { type: "UPDATE_WITHDRAWAL"; id: string; patch: Partial<WithdrawRecord> }
-  | { type: "CANCEL_ORDER";      id: string };
+  | { type: "CANCEL_ORDER";      id: string }
+  | { type: "PLACE_BINARY";      option: BinaryOption }
+  | { type: "SETTLE_BINARY";     id: string; closePrice: number };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -133,7 +175,31 @@ function reducer(state: State, action: Action): State {
     case "SET_TICKERS":
       return { ...state, tickers: action.tickers };
 
-    case "PLACE_ORDER":
+    // ── Бинарные опционы ────────────────────────────────────────────────────
+    case "PLACE_BINARY":
+      return { ...state, binaryOptions: [action.option, ...state.binaryOptions] };
+
+    case "SETTLE_BINARY": {
+      const opt = state.binaryOptions.find(o => o.id === action.id);
+      if (!opt || opt.status !== "active") return state;
+      const diff = action.closePrice - opt.openPrice;
+      const won  = (opt.direction === "call" && diff > 0) || (opt.direction === "put" && diff < 0);
+      const draw = diff === 0;
+      const status: BinaryStatus = draw ? "draw" : won ? "won" : "lost";
+      const pnl   = draw ? 0 : won ? opt.stake * PAYOUT_RATE : -opt.stake * PAYOUT_RATE;
+      const refund = opt.stake + pnl;        // возврат USDT на баланс
+      const qa = state.assets["USDT"] ?? makeAsset("USDT");
+      return {
+        ...state,
+        binaryOptions: state.binaryOptions.map(o =>
+          o.id === action.id ? { ...o, status, pnl, closePrice: action.closePrice } : o
+        ),
+        assets: {
+          ...state.assets,
+          USDT: { ...qa, available: qa.available + refund },
+        },
+      };
+    }    case "PLACE_ORDER":
       return { ...state, orders: [action.order, ...state.orders] };
 
     case "UPDATE_ORDER":
@@ -207,6 +273,7 @@ interface ExchangeCtx {
   initiateWithdrawal: (asset: string, amount: number, address: string) => { ok: boolean; error?: string };
   totalUSDT:          () => number;
   unrealizedPnl:      (symbol: string) => { pnl: number; pct: number };
+  placeBinary:        (symbol: string, direction: BinaryDirection, stake: number, expiryMs: number) => { ok: boolean; error?: string };
 }
 
 const Ctx = createContext<ExchangeCtx | null>(null);
@@ -223,6 +290,11 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
     const unsub = subscribeTickers(tickers => dispatch({ type: "SET_TICKERS", tickers }));
     return () => { unsub(); };
   }, []);
+
+  // Сохраняем пользователя в localStorage
+  useEffect(() => {
+    saveUser(state.user);
+  }, [state.user]);
 
   // ── Симуляция исполнения лимитных ордеров ──────────────────────────────────
   useEffect(() => {
@@ -337,7 +409,7 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
     const order: Order = {
       id: "ord_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       symbol, side, type, price: execPrice, qty, filledQty: 0,
-      status: "pending", fee: 0, feeAsset: side === "buy" ? base : quote,
+      status: "pending", fee: 0, feeAsset: quote, // комиссия всегда в котируемом активе (USDT)
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     dispatch({ type: "PLACE_ORDER", order });
@@ -488,8 +560,42 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
     return { pnl, pct };
   }, []);
 
+  // ── placeBinary ─────────────────────────────────────────────────────────────
+  const placeBinary = useCallback((
+    symbol: string, direction: BinaryDirection, stake: number, expiryMs: number,
+  ): { ok: boolean; error?: string } => {
+    const st = stateRef.current;
+    const tk = getTicker(symbol);
+    if (!tk)          return { ok: false, error: "Пара не найдена" };
+    if (stake <= 0)   return { ok: false, error: "Укажите ставку" };
+    const qa = st.assets["USDT"] ?? makeAsset("USDT");
+    if (qa.available < stake) return { ok: false, error: `Недостаточно USDT. Нужно ${stake.toFixed(2)}, доступно ${qa.available.toFixed(2)}` };
+
+    // Списываем ставку сразу
+    dispatch({ type: "UPDATE_ASSET", symbol: "USDT", patch: { available: qa.available - stake } });
+
+    const option: BinaryOption = {
+      id:        "bin_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      symbol, direction, stake,
+      openPrice: tk.price,
+      expiryMs, expiresAt: Date.now() + expiryMs,
+      status: "active", pnl: 0,
+      createdAt: Date.now(),
+    };
+    dispatch({ type: "PLACE_BINARY", option });
+
+    // Settles at expiry
+    setTimeout(() => {
+      const closeTk = getTicker(symbol);
+      const closePrice = closeTk?.price ?? option.openPrice;
+      dispatch({ type: "SETTLE_BINARY", id: option.id, closePrice });
+    }, expiryMs);
+
+    return { ok: true };
+  }, []);
+
   return (
-    <Ctx.Provider value={{ state, dispatch, login, logout, placeOrder, cancelOrder, closePosition, initiateDeposit, initiateWithdrawal, totalUSDT, unrealizedPnl }}>
+    <Ctx.Provider value={{ state, dispatch, login, logout, placeOrder, cancelOrder, closePosition, initiateDeposit, initiateWithdrawal, totalUSDT, unrealizedPnl, placeBinary }}>
       {children}
     </Ctx.Provider>
   );

@@ -83,8 +83,7 @@ export function BottomNav() {
                 layoutId="nav-pill"
                 transition={{ duration: 0.2, ease: EASE }}
                 style={{
-                  position: "absolute", top: 0, left: "50%",
-                  transform: "translateX(-50%)",
+                  position: "absolute", top: 0, left: "calc(50% - 16px)",
                   width: 32, height: 2, borderRadius: 1,
                   background: "var(--accent)",
                 }}

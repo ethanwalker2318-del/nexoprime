@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useExchange } from "../../shared/store/exchangeStore";
 import { useRouter } from "../../app/providers/RouterProvider";
@@ -55,102 +55,230 @@ function statusColor(s: BinaryStatus): string {
   return s === "won" ? "var(--pos)" : s === "lost" ? "var(--neg)" : s === "active" ? "var(--accent)" : "var(--text-4)";
 }
 
-// SVG Candle Chart
+// SVG Candle Chart с поддержкой pan / pinch-zoom / wheel
 function CandleChart({ candles, currentPrice, change, entryLines }: {
   candles:      Candle[];
   currentPrice: number;
   change:       number;
   entryLines:   { price: number; color: string; direction: BinaryDirection }[];
 }) {
-  const W = 360, H = 210;
-  if (candles.length < 2) {
-    return (
-      <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-0)" }}>
-        <span style={{ fontSize: 12, color: "var(--text-4)" }}>Загрузка...</span>
-      </div>
-    );
-  }
+  const H = 220;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(360);
+  // panOffset = кол-во свечей спрятано справа (0 = правый край = текущая свеча)
+  const [panOffset, setPanOffset] = useState(0);
+  // zoom = сколько свечей видно
+  const [zoom, setZoom] = useState(55);
+  const drag = useRef({ active: false, startX: 0, startOff: 0, pinchDist: 0 });
 
-  const displayed = candles.slice(-60);
+  // Измеряем реальную ширину контейнера
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const rect = entries[0]?.contentRect;
+      if (rect) setW(rect.width || 360);
+    });
+    ro.observe(el);
+    setW(el.offsetWidth || 360);
+    return () => ro.disconnect();
+  }, []);
+
+  const maxOff  = Math.max(0, candles.length - zoom);
+  const clampOff = Math.min(panOffset, maxOff);
+
+  // Индексы отображаемых свечей
+  const rightIdx   = candles.length - 1 - clampOff;
+  const leftIdx    = Math.max(0, rightIdx - zoom + 1);
+  const displayed  = candles.slice(leftIdx, rightIdx + 1);
+
+  const cW   = w / zoom;
+  const body = Math.max(1.5, cW * 0.6);
+  const gap  = (cW - body) / 2;
+
+  // Ценовой диапазон только по видимым свечам
   const allPrices = displayed.flatMap(c => [c.high, c.low]);
   entryLines.forEach(l => allPrices.push(l.price));
-  allPrices.push(currentPrice);
-
-  const rawMin = Math.min(...allPrices);
-  const rawMax = Math.max(...allPrices);
-  const pad    = (rawMax - rawMin) * 0.1 || rawMin * 0.01;
+  if (clampOff === 0) allPrices.push(currentPrice);
+  const rawMin = allPrices.length ? Math.min(...allPrices) : 0;
+  const rawMax = allPrices.length ? Math.max(...allPrices) : 1;
+  const pad    = (rawMax - rawMin) * 0.12 || rawMin * 0.01 || 1;
   const min    = rawMin - pad;
   const max    = rawMax + pad;
   const range  = max - min || 1;
   const toY    = (v: number) => H - ((v - min) / range) * H;
 
-  const n    = displayed.length;
-  const cW   = W / n;
-  const body = Math.max(1.5, cW * 0.55);
-  const gap  = (cW - body) / 2;
   const isPos = change >= 0;
   const curY  = toY(currentPrice);
-  const lastC = displayed[displayed.length - 1]!;
+  const lastC = displayed[displayed.length - 1];
+
+  // ── Drag helpers ──────────────────────────────────────────────────────────
+  const getPinchDist = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) return 0;
+    const dx = e.touches[0]!.clientX - e.touches[1]!.clientX;
+    const dy = e.touches[0]!.clientY - e.touches[1]!.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const applyPan = useCallback((dx: number, baseOff: number) => {
+    const delta = Math.round(-dx / cW);
+    setPanOffset(Math.max(0, Math.min(maxOff, baseOff + delta)));
+  }, [cW, maxOff]);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    drag.current = { active: true, startX: e.clientX, startOff: clampOff, pinchDist: 0 };
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!drag.current.active) return;
+    applyPan(e.clientX - drag.current.startX, drag.current.startOff);
+  };
+  const onMouseUp = () => { drag.current.active = false; };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    const pd = getPinchDist(e);
+    if (pd > 0) {
+      drag.current = { active: false, startX: 0, startOff: clampOff, pinchDist: pd };
+    } else {
+      drag.current = { active: true, startX: e.touches[0]!.clientX, startOff: clampOff, pinchDist: 0 };
+    }
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const pd = getPinchDist(e);
+    if (pd > 0 && drag.current.pinchDist > 0) {
+      const ratio = drag.current.pinchDist / pd;
+      setZoom(z => Math.max(8, Math.min(220, Math.round(z * ratio))));
+      drag.current.pinchDist = pd;
+    } else if (drag.current.active) {
+      applyPan(e.touches[0]!.clientX - drag.current.startX, drag.current.startOff);
+    }
+  };
+  const onTouchEnd = () => { drag.current.active = false; drag.current.pinchDist = 0; };
+
+  const onWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.ctrlKey || (Math.abs(e.deltaY) > Math.abs(e.deltaX) && !e.shiftKey)) {
+      // Zoom колёсиком (ctrl+wheel или просто вертикальный scroll)
+      setZoom(z => Math.max(8, Math.min(220, z + Math.sign(e.deltaY) * Math.max(1, Math.round(z * 0.08)))));
+    } else {
+      // Pan горизонтальным свайпом трекпада или shift+wheel
+      const delta = e.shiftKey ? e.deltaY : e.deltaX;
+      setPanOffset(o => Math.max(0, Math.min(maxOff, o + Math.round(delta / cW))));
+    }
+  };
+
+  if (candles.length < 2) {
+    return (
+      <div ref={containerRef} style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-0)" }}>
+        <span style={{ fontSize: 12, color: "var(--text-4)" }}>Загрузка...</span>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ position: "relative", width: "100%", background: "var(--bg-0)" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" style={{ display: "block" }}>
-        {[0.15, 0.35, 0.55, 0.75, 0.9].map(f => (
-          <line key={f} x1={0} y1={H*f} x2={W} y2={H*f} stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+    <div
+      ref={containerRef}
+      style={{ position: "relative", width: "100%", background: "var(--bg-0)", touchAction: "none", userSelect: "none", cursor: drag.current.active ? "grabbing" : "grab" }}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseUp}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onWheel={onWheel}
+    >
+      <svg width={w} height={H} style={{ display: "block" }}>
+        {/* Сетка */}
+        {[0.12, 0.3, 0.5, 0.7, 0.88].map(f => (
+          <line key={f} x1={0} y1={H * f} x2={w} y2={H * f} stroke="rgba(255,255,255,0.05)" strokeWidth="0.8" />
         ))}
-        {displayed.map((c, i) => {
-          const green   = c.close >= c.open;
-          const col     = green ? "var(--pos)" : "var(--neg)";
-          const x       = i * cW;
-          const openY   = toY(c.open);
-          const closeY  = toY(c.close);
-          const highY   = toY(c.high);
-          const lowY    = toY(c.low);
-          const bodyTop = Math.min(openY, closeY);
-          const bodyH   = Math.max(1.5, Math.abs(openY - closeY));
-          const wickX   = x + gap + body / 2;
+        {/* Ценовые метки сетки */}
+        {[0.12, 0.3, 0.5, 0.7, 0.88].map(f => (
+          <text key={`p${f}`} x={4} y={H * f - 3} fontSize="8" fill="rgba(255,255,255,0.2)">
+            {fmtPrice(min + (1 - f) * range)}
+          </text>
+        ))}
+        {/* Свечи */}
+        {displayed.map((c, j) => {
+          const green  = c.close >= c.open;
+          const col    = green ? "var(--pos)" : "var(--neg)";
+          // Позиция: j=displayed.length-1 — правая свеча экрана
+          const x      = w - (displayed.length - j) * cW;
+          const openY  = toY(c.open);
+          const closeY = toY(c.close);
+          const highY  = toY(c.high);
+          const lowY   = toY(c.low);
+          const bTop   = Math.min(openY, closeY);
+          const bH     = Math.max(1.5, Math.abs(openY - closeY));
+          const wickX  = x + gap + body / 2;
           return (
-            <g key={i}>
+            <g key={j}>
               <line x1={wickX} y1={highY} x2={wickX} y2={lowY} stroke={col} strokeWidth="0.9" opacity="0.85" />
-              <rect x={x+gap} y={bodyTop} width={body} height={bodyH} fill={col} opacity="0.9" />
+              <rect x={x + gap} y={bTop} width={body} height={bH} fill={col} opacity="0.92" />
             </g>
           );
         })}
-        <line x1={0} y1={curY} x2={W} y2={curY}
-          stroke={isPos ? "var(--pos)" : "var(--neg)"} strokeWidth="0.8" strokeDasharray="4 4" opacity="0.6" />
+        {/* Линия текущей цены (только на правом крае) */}
+        {clampOff === 0 && (
+          <line x1={0} y1={curY} x2={w} y2={curY}
+            stroke={isPos ? "var(--pos)" : "var(--neg)"} strokeWidth="0.8" strokeDasharray="4 4" opacity="0.55" />
+        )}
+        {/* Линии входа активных опционов */}
         {entryLines.map((el, idx) => {
           const ey = toY(el.price);
           return (
             <g key={idx}>
-              <line x1={0} y1={ey} x2={W} y2={ey}
+              <line x1={0} y1={ey} x2={w} y2={ey}
                 stroke={el.color} strokeWidth="1.2" strokeDasharray="6 4" opacity="0.9" />
-              <text x={2} y={ey - 3} fontSize="8" fill={el.color} opacity="0.95">
+              <text x={4} y={ey - 4} fontSize="8" fill={el.color} opacity="0.95">
                 {el.direction === "call" ? "▲" : "▼"} {fmtPrice(el.price)}
               </text>
             </g>
           );
         })}
       </svg>
-      <div style={{ position:"absolute", top:4, left:6, fontSize:9, color:"var(--text-4)", fontVariantNumeric:"tabular-nums", pointerEvents:"none" }}>
-        {fmtPrice(max - pad)}
-      </div>
-      <div style={{ position:"absolute", bottom:4, left:6, fontSize:9, color:"var(--text-4)", fontVariantNumeric:"tabular-nums", pointerEvents:"none" }}>
-        {fmtPrice(min + pad)}
-      </div>
-      <div style={{
-        position:"absolute", top: Math.max(2, Math.min(H-18, curY-9)), right:4,
-        fontSize:10, fontWeight:700, whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums",
-        color: isPos ? "var(--pos)" : "var(--neg)",
-        background: isPos ? "rgba(49,208,170,0.18)" : "rgba(255,91,110,0.18)",
-        border: `1px solid ${isPos ? "rgba(49,208,170,0.5)" : "rgba(255,91,110,0.5)"}`,
-        borderRadius:4, padding:"1px 5px", pointerEvents:"none",
-      }}>
-        {fmtPrice(currentPrice)}
-      </div>
-      <div style={{ position:"absolute", top:4, right:52, display:"flex", gap:8, fontSize:9, color:"var(--text-4)", fontVariantNumeric:"tabular-nums", pointerEvents:"none" }}>
-        {[{l:"O",v:lastC.open},{l:"H",v:lastC.high,c:"var(--pos)"},{l:"L",v:lastC.low,c:"var(--neg)"},{l:"C",v:lastC.close}].map(({l,v,c})=>(
-          <span key={l} style={{color: c ?? "var(--text-3)"}}>{l} <span style={{color:"var(--text-2)"}}>{fmtPrice(v)}</span></span>
-        ))}
+
+      {/* Метка текущей цены справа */}
+      {clampOff === 0 && (
+        <div style={{
+          position: "absolute", top: Math.max(2, Math.min(H - 18, curY - 9)), right: 4,
+          fontSize: 10, fontWeight: 700, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums",
+          color: isPos ? "var(--pos)" : "var(--neg)",
+          background: isPos ? "rgba(49,208,170,0.18)" : "rgba(255,91,110,0.18)",
+          border: `1px solid ${isPos ? "rgba(49,208,170,0.5)" : "rgba(255,91,110,0.5)"}`,
+          borderRadius: 4, padding: "1px 5px", pointerEvents: "none",
+        }}>
+          {fmtPrice(currentPrice)}
+        </div>
+      )}
+
+      {/* OHLC последней видимой свечи */}
+      {lastC && (
+        <div style={{ position: "absolute", top: 4, left: 6, display: "flex", gap: 8, fontSize: 9, color: "var(--text-4)", fontVariantNumeric: "tabular-nums", pointerEvents: "none" }}>
+          {([{ l: "O", v: lastC.open }, { l: "H", v: lastC.high, c: "var(--pos)" }, { l: "L", v: lastC.low, c: "var(--neg)" }, { l: "C", v: lastC.close }] as {l:string;v:number;c?:string}[]).map(({ l, v, c }) => (
+            <span key={l}>{l} <span style={{ color: c ?? "var(--text-2)", fontWeight: 600 }}>{fmtPrice(v)}</span></span>
+          ))}
+        </div>
+      )}
+
+      {/* Кнопка «Следить» когда пользователь отъехал влево */}
+      {clampOff > 0 && (
+        <button
+          onMouseDown={e => e.stopPropagation()}
+          onClick={() => { setPanOffset(0); }}
+          style={{
+            position: "absolute", bottom: 8, right: 8,
+            padding: "4px 12px", borderRadius: 12, fontSize: 10, fontWeight: 600, cursor: "pointer",
+            background: "var(--surface-2)", border: "1px solid var(--accent-border)", color: "var(--accent)",
+          }}
+        >
+          ▶ Следить
+        </button>
+      )}
+
+      {/* Подсказка зума */}
+      <div style={{ position: "absolute", bottom: 8, left: 6, fontSize: 9, color: "rgba(255,255,255,0.2)", pointerEvents: "none" }}>
+        {zoom}св
       </div>
     </div>
   );

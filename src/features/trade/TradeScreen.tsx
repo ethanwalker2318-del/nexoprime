@@ -137,7 +137,7 @@ function CandleChart({ candles, currentPrice, change, expiryLine }: {
   );
 }
 
-// ─── арточка активного опциона ───────────────────────────────────────────────
+// ─── Карточка активного опциона ─────────────────────────────────────────────
 function ActiveOptionCard({ option, currentPrice }: { option: BinaryOption; currentPrice: number }) {
   const [remaining, setRemaining] = useState(option.expiresAt - Date.now());
 
@@ -148,7 +148,8 @@ function ActiveOptionCard({ option, currentPrice }: { option: BinaryOption; curr
 
   const isCall  = option.direction === "call";
   const winning = isCall ? currentPrice > option.openPrice : currentPrice < option.openPrice;
-  const pnlNow  = winning ? option.stake * PAYOUT_RATE : -option.stake * PAYOUT_RATE;
+  // При выигрыше показываем потенциальную прибыль, при проигрыше — полную потерю ставки
+  const pnlNow  = winning ? option.stake * PAYOUT_RATE : -option.stake;
   const pct     = Math.max(0, Math.min(100, (remaining / option.expiryMs) * 100));
 
   return (
@@ -186,7 +187,7 @@ function ActiveOptionCard({ option, currentPrice }: { option: BinaryOption; curr
           <div style={{ fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>${option.stake.toFixed(2)}</div>
         </div>
         <div>
-          <div style={{ fontSize: 9, color: "var(--text-4)" }}>ена входа</div>
+          <div style={{ fontSize: 9, color: "var(--text-4)" }}>Цена входа</div>
           <div style={{ fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>{fmtPrice(option.openPrice)}</div>
         </div>
         <div>
@@ -200,7 +201,7 @@ function ActiveOptionCard({ option, currentPrice }: { option: BinaryOption; curr
   );
 }
 
-// ─── арточка истории опциона ─────────────────────────────────────────────────
+// ─── Карточка истории опциона ───────────────────────────────────────────────
 function HistoryOptionCard({ option }: { option: BinaryOption }) {
   const isCall = option.direction === "call";
   return (
@@ -387,11 +388,11 @@ export function TradeScreen() {
         {tk && (
           <div style={{ display: "flex", gap: 14, paddingBottom: 8, overflowX: "auto" }}>
             {[
-              { label: "24ч акс", val: fmtPrice(tk.high24h), c: "var(--pos)" },
-              { label: "24ч ин",  val: fmtPrice(tk.low24h),  c: "var(--neg)" },
-              { label: "Bid",      val: fmtPrice(tk.bid),      c: "var(--pos)" },
-              { label: "Ask",      val: fmtPrice(tk.ask),      c: "var(--neg)" },
-              { label: "аланс",   val: `$${(usdt?.available ?? 0).toFixed(2)}` },
+              { label: "24ч Макс", val: fmtPrice(tk.high24h), c: "var(--pos)" },
+              { label: "24ч Мин",  val: fmtPrice(tk.low24h),  c: "var(--neg)" },
+              { label: "Bid",       val: fmtPrice(tk.bid),      c: "var(--pos)" },
+              { label: "Ask",       val: fmtPrice(tk.ask),      c: "var(--neg)" },
+              { label: "Баланс",   val: `$${(usdt?.available ?? 0).toFixed(2)}` },
             ].map(s => (
               <div key={s.label} style={{ flexShrink: 0 }}>
                 <div style={{ fontSize: 9, color: "var(--text-4)", marginBottom: 1 }}>{s.label}</div>
@@ -408,7 +409,7 @@ export function TradeScreen() {
         {/* Свечной OHLC-чарт */}
         <CandleChart candles={candles} currentPrice={tk?.price ?? 0} change={tk?.change24h ?? 0} expiryLine={entryLine} />
 
-        {/* ── анель торговли ── */}
+        {/* ── Панель торговли ── */}
         <div style={{ background: "var(--bg-0)", borderTop: "1px solid var(--line-1)", padding: "12px" }}>
 
           {/* CALL / PUT */}
@@ -432,9 +433,9 @@ export function TradeScreen() {
             ))}
           </div>
 
-          {/* кспирация */}
+          {/* Экспирация */}
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 5 }}>СЯ</div>
+            <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 5 }}>ЭКСПИРАЦИЯ</div>
             <div style={{ display: "flex", gap: 5 }}>
               {EXPIRY_OPTIONS.map((e, i) => (
                 <button key={e.label} onClick={() => setExpiryIdx(i)} style={{
@@ -452,7 +453,7 @@ export function TradeScreen() {
 
           {/* Ставка */}
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 5 }}>СТ (USDT)</div>
+            <div style={{ fontSize: 10, color: "var(--text-4)", marginBottom: 5 }}>СТАВКА (USDT)</div>
             <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
               {STAKE_PRESETS.map(p => (
                 <button key={p} onClick={() => setStake(String(p))} style={{
@@ -480,29 +481,33 @@ export function TradeScreen() {
             />
           </div>
 
-          {/* нфо о выплате */}
-          {stakeNum > 0 && (
-            <div style={{
-              display: "flex", justifyContent: "space-between",
-              background: "var(--surface-2)", border: "1px solid var(--line-1)",
-              borderRadius: "var(--r-sm)", padding: "8px 12px", marginBottom: 12, fontSize: 11,
-            }}>
-              <div>
-                <div style={{ fontSize: 9, color: "var(--text-4)" }}>Ставка</div>
-                <div style={{ fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>${stakeNum.toFixed(2)}</div>
+          {/* Инфо о выплате */}
+          {stakeNum > 0 && (() => {
+            const winTotal = (stakeNum + payout).toFixed(2);
+            const payoutStr = payout.toFixed(2);
+            const stakeStr = stakeNum.toFixed(2);
+            return (
+              <div style={{
+                background: "var(--surface-2)", border: "1px solid var(--line-1)",
+                borderRadius: "var(--r-sm)", padding: "10px 12px", marginBottom: 12,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: "var(--text-4)" }}>Ставка</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-1)", fontVariantNumeric: "tabular-nums" }}>${stakeStr}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, color: "var(--pos)" }}>✓ Победа (+{(PAYOUT_RATE * 100).toFixed(0)}%)</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--pos)", fontVariantNumeric: "tabular-nums" }}>+${payoutStr} = ${winTotal}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 10, color: "var(--neg)" }}>✗ Поражение</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--neg)", fontVariantNumeric: "tabular-nums" }}>-${stakeStr} = $0.00</span>
+                </div>
               </div>
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 9, color: "var(--text-4)" }}>ыигрыш +{(PAYOUT_RATE * 100).toFixed(0)}%</div>
-                <div style={{ fontWeight: 700, color: "var(--pos)", fontVariantNumeric: "tabular-nums" }}>+${payout.toFixed(2)}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 9, color: "var(--text-4)" }}>роигрыш −{(PAYOUT_RATE * 100).toFixed(0)}%</div>
-                <div style={{ fontWeight: 700, color: "var(--neg)", fontVariantNumeric: "tabular-nums" }}>−${payout.toFixed(2)}</div>
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
-          {/* нопка разместить */}
+          {/* Кнопка разместить */}
           <button onClick={handlePlace} style={{
             width: "100%", padding: "13px", border: "none", borderRadius: "var(--r-md)",
             color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer",
@@ -517,12 +522,12 @@ export function TradeScreen() {
           </button>
         </div>
 
-        {/* ── ижние табы ── */}
+        {/* ── Нижние табы ── */}
         <div style={{ borderTop: "1px solid var(--line-1)", background: "var(--bg-0)" }}>
           <div style={{ display: "flex", borderBottom: "1px solid var(--line-1)" }}>
             {([
-              { key: "active"  as BottomTab, label: `ктивные${activeOptions.length ? ` (${activeOptions.length})` : ""}` },
-              { key: "history" as BottomTab, label: "стория" },
+              { key: "active"  as BottomTab, label: `Активные${activeOptions.length ? ` (${activeOptions.length})` : ""}` },
+              { key: "history" as BottomTab, label: "История" },
             ]).map(t => (
               <button key={t.key} onClick={() => setBottomTab(t.key)} style={tabStyle(bottomTab === t.key)}>
                 {t.label}
@@ -531,12 +536,12 @@ export function TradeScreen() {
           </div>
         </div>
 
-        {/* ── ктивные опционы ── */}
+        {/* ── Активные опционы ── */}
         {bottomTab === "active" && (
           <div style={{ padding: "10px 12px", paddingBottom: "calc(10px + var(--nav-height) + var(--safe-bottom))" }}>
             {activeOptions.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-4)", fontSize: 13 }}>
-                ет активных опционов — сделайте первый CALL или PUT
+                Нет активных опционов — сделайте первый CALL или PUT
               </div>
             ) : (
               activeOptions.map(o => (
@@ -546,13 +551,13 @@ export function TradeScreen() {
           </div>
         )}
 
-        {/* ── стория ── */}
+        {/* ── История ── */}
         {bottomTab === "history" && (
           <div style={{ padding: "10px 12px", paddingBottom: "calc(10px + var(--nav-height) + var(--safe-bottom))" }}>
             <HistoryStats options={pairOptions} />
             {historyOptions.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-4)", fontSize: 13 }}>
-                стория пуста
+                История пуста
               </div>
             ) : (
               historyOptions.map(o => <HistoryOptionCard key={o.id} option={o} />)

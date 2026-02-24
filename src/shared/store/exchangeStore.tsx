@@ -186,8 +186,9 @@ function reducer(state: State, action: Action): State {
       const won  = (opt.direction === "call" && diff > 0) || (opt.direction === "put" && diff < 0);
       const draw = diff === 0;
       const status: BinaryStatus = draw ? "draw" : won ? "won" : "lost";
-      const pnl   = draw ? 0 : won ? opt.stake * PAYOUT_RATE : -opt.stake * PAYOUT_RATE;
-      const refund = opt.stake + pnl;        // возврат USDT на баланс
+      // WIN: вернуть ставку + payout%; LOSS: ставка сгорает полностью; DRAW: ставка возвращается
+      const pnl    = draw ? 0 : won ? opt.stake * PAYOUT_RATE : -opt.stake;
+      const refund = draw ? opt.stake : won ? opt.stake + opt.stake * PAYOUT_RATE : 0;
       const qa = state.assets["USDT"] ?? makeAsset("USDT");
       return {
         ...state,

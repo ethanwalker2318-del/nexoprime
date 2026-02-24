@@ -1,3 +1,3 @@
-export type Screen = "dashboard" | "trade" | "wallet" | "analytics" | "profile";
+﻿export type Screen = "home" | "markets" | "trade" | "wallet" | "profile";
 
-export const SCREENS: Screen[] = ["dashboard", "trade", "wallet", "analytics", "profile"];
+export const SCREENS: Screen[] = ["home", "markets", "trade", "wallet", "profile"];

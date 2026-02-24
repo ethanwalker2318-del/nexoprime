@@ -1,58 +1,51 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700&display=swap");
+﻿@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
 :root {
-  --font-ui: "Manrope", "Segoe UI", sans-serif;
-  --font-display: "Sora", "Manrope", sans-serif;
-
-  --bg-primary: #071325;
-  --bg-surface: #0f1d33;
-  --bg-elevated: #162843;
-
-  --accent-trust: #59a6ff;
-  --profit: #27b36a;
-  --loss: #ef5d6d;
-
-  --text-primary: #e9f2ff;
-  --text-secondary: #8da2c3;
-  --border-soft: rgba(153, 178, 214, 0.18);
-  --glow-soft: rgba(89, 166, 255, 0.2);
-
-  --radius-sm: 12px;
-  --radius-md: 16px;
-  --radius-lg: 20px;
-
-  --shadow-surface: 0 10px 26px rgba(3, 8, 20, 0.38);
-  --shadow-elevated:
-    0 18px 42px rgba(4, 14, 32, 0.5),
-    inset 0 1px 0 rgba(219, 234, 254, 0.08);
-  --shadow-interactive:
-    0 0 0 1px rgba(89, 166, 255, 0.28),
-    0 22px 42px rgba(46, 129, 232, 0.26);
+  --bg-0: #070A0F;
+  --bg-1: #0B1220;
+  --surface-1: #0F1A2E;
+  --surface-2: #132341;
+  --surface-3: #172B4E;
+  --line-1: rgba(255,255,255,0.06);
+  --line-2: rgba(255,255,255,0.10);
+  --text-1: rgba(255,255,255,0.92);
+  --text-2: rgba(255,255,255,0.70);
+  --text-3: rgba(255,255,255,0.48);
+  --text-4: rgba(255,255,255,0.28);
+  --accent: #4DA3FF;
+  --accent-dim: rgba(77,163,255,0.18);
+  --accent-border: rgba(77,163,255,0.35);
+  --pos: #31D0AA;
+  --pos-dim: rgba(49,208,170,0.14);
+  --pos-border: rgba(49,208,170,0.30);
+  --neg: #FF5B6E;
+  --neg-dim: rgba(255,91,110,0.14);
+  --neg-border: rgba(255,91,110,0.30);
+  --warn: #F0A732;
+  --warn-dim: rgba(240,167,50,0.14);
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 22px;
+  --shadow-card: 0 2px 12px rgba(0,0,0,.36),inset 0 1px 0 rgba(255,255,255,.04);
+  --shadow-sheet: 0 -8px 32px rgba(0,0,0,.5),0 -1px 0 rgba(255,255,255,.06);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,.7),0 8px 24px rgba(0,0,0,.4);
+  --font-ui: "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --ease-out: cubic-bezier(0.22,1,0.36,1);
+  --ease-in-out: cubic-bezier(0.4,0,0.2,1);
+  --dur-fast: 140ms;
+  --dur-mid: 220ms;
+  --dur-slow: 320ms;
+  --safe-bottom: env(safe-area-inset-bottom,0px);
+  --safe-top: env(safe-area-inset-top,0px);
+  --nav-height: 60px;
 }
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  height: 100%;
-}
-
-html {
-  color-scheme: dark;
-  scroll-behavior: smooth;
-}
-
-body {
-  margin: 0;
-  font-family: var(--font-ui);
-  background:
-    radial-gradient(1200px 540px at 8% -20%, rgba(87, 147, 255, 0.2), transparent 65%),
-    radial-gradient(900px 500px at 92% 8%, rgba(32, 88, 176, 0.18), transparent 62%),
-    linear-gradient(180deg, #061021 0%, #050b17 100%);
-  color: var(--text-primary);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
+*,*::before,*::after{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body,#root{height:100%;overscroll-behavior:none}
+html{color-scheme:dark}
+body{margin:0;font-family:var(--font-ui);font-size:14px;line-height:1.5;background:var(--bg-0);color:var(--text-1);-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield}
+::-webkit-scrollbar{width:0;height:0}
+::selection{background:rgba(77,163,255,.22)}

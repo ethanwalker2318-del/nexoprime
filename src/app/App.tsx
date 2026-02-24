@@ -1,52 +1,69 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { DashboardScreen } from "../features/dashboard/DashboardScreen";
-import { WalletScreen } from "../features/wallet/WalletScreen";
-import { TradeScreen } from "../features/trade/TradeScreen";
-import { AnalyticsScreen } from "../features/analytics/AnalyticsScreen";
-import { ProfileScreen } from "../features/profile/ProfileScreen";
-import { BottomNav } from "../shared/ui/BottomNav";
-import { I18nProvider } from "./providers/I18nProvider";
-import { AppMotionProvider } from "./providers/MotionProvider";
-import { TelegramProvider } from "./providers/TelegramProvider";
+import { ExchangeProvider } from "../shared/store/exchangeStore";
 import { RouterProvider, useRouter } from "./providers/RouterProvider";
+import { I18nProvider } from "./providers/I18nProvider";
+import { TelegramProvider } from "./providers/TelegramProvider";
+import { BottomNav } from "../shared/ui/BottomNav";
+import { Onboarding } from "../features/onboarding/Onboarding";
+import { HomeScreen } from "../features/home/HomeScreen";
+import { MarketsScreen } from "../features/markets/MarketsScreen";
+import { TradeScreen } from "../features/trade/TradeScreen";
+import { WalletScreen } from "../features/wallet/WalletScreen";
+import { ProfileScreen } from "../features/profile/ProfileScreen";
+import { useExchange } from "../shared/store/exchangeStore";
 
-const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const SLIDE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 function AppShell() {
   const { screen } = useRouter();
+  const { state } = useExchange();
+
+  if (!state.user) return <Onboarding />;
+
+  const screens: Record<string, React.ReactNode> = {
+    home:     <HomeScreen />,
+    markets:  <MarketsScreen />,
+    trade:    <TradeScreen />,
+    wallet:   <WalletScreen />,
+    profile:  <ProfileScreen />,
+  };
 
   return (
-    <div className="app-shell">
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={screen}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -10 }}
-          transition={{ duration: 0.2, ease: EASE }}
-          className="app-screen"
-        >
-          {screen === "dashboard" && <DashboardScreen />}
-          {screen === "trade" && <TradeScreen />}
-          {screen === "wallet" && <WalletScreen />}
-          {screen === "analytics" && <AnalyticsScreen />}
-          {screen === "profile" && <ProfileScreen />}
-        </motion.div>
-      </AnimatePresence>
+    <div style={{
+      display: "flex", flexDirection: "column",
+      height: "100%", background: "var(--bg-0)",
+    }}>
+      <div style={{
+        flex: 1, overflow: "hidden", position: "relative",
+        paddingTop: "var(--safe-top)",
+      }}>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={screen}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.22, ease: SLIDE }}
+            style={{ height: "100%", overflow: "hidden auto" }}
+          >
+            {screens[screen]}
+          </motion.div>
+        </AnimatePresence>
+      </div>
       <BottomNav />
     </div>
   );
 }
 
-export function App() {
+export default function App() {
   return (
     <TelegramProvider>
       <I18nProvider>
-        <AppMotionProvider>
-          <RouterProvider>
+        <RouterProvider>
+          <ExchangeProvider>
             <AppShell />
-          </RouterProvider>
-        </AppMotionProvider>
+          </ExchangeProvider>
+        </RouterProvider>
       </I18nProvider>
     </TelegramProvider>
   );

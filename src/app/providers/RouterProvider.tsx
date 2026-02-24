@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type PropsWithChildren } from "react";
+﻿import { createContext, useContext, useState, type PropsWithChildren } from "react";
 import type { Screen } from "../router";
 
 interface RouterContextValue {
@@ -7,13 +7,12 @@ interface RouterContextValue {
 }
 
 const RouterContext = createContext<RouterContextValue>({
-  screen: "dashboard",
-  navigate: () => undefined
+  screen: "home",
+  navigate: () => undefined,
 });
 
 export function RouterProvider({ children }: PropsWithChildren) {
-  const [screen, setScreen] = useState<Screen>("dashboard");
-
+  const [screen, setScreen] = useState<Screen>("home");
   return (
     <RouterContext.Provider value={{ screen, navigate: setScreen }}>
       {children}

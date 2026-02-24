@@ -1,529 +1,582 @@
-import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
-import { useI18n } from "../../app/providers/I18nProvider";
-import { cx } from "../../shared/lib/cx";
+import { motion, AnimatePresence } from "framer-motion";
+import { useExchange } from "../../shared/store/exchangeStore";
+import type { DepositRecord, WithdrawRecord } from "../../shared/store/exchangeStore";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const ASSETS = ["USDT", "BTC", "ETH", "SOL", "BNB"];
 
-type WalletTab = "deposit" | "withdraw" | "exchange" | "history";
+type Tab = "balances" | "deposit" | "withdraw" | "history";
 
-type TxStatus = "completed" | "pending" | "failed";
+const STATUS_LABEL: Record<string, string> = {
+  pending: "Ожидается", confirming: "Подтверждается", credited: "Зачислено",
+  processing: "Обрабатывается", sent: "Отправлено", failed: "Отклонено",
+};
+const STATUS_COLOR: Record<string, string> = {
+  pending: "var(--warn)", confirming: "var(--accent)", credited: "var(--pos)",
+  processing: "var(--accent)", sent: "var(--pos)", failed: "var(--neg)",
+};
 
-interface Transaction {
-  id: string;
-  type: "deposit" | "withdraw" | "exchange";
-  asset: string;
-  amount: number;
-  usdValue: number;
-  status: TxStatus;
-  date: string;
-  hash?: string;
+function fmtDate(ts: number) {
+  return new Date(ts).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-interface Network {
-  id: string;
-  name: string;
-  symbol: string;
-  confirmations: number;
-  minDeposit: number;
-  fee: string;
+function fmtNum(n: number) {
+  if (n >= 1) return n.toLocaleString("ru-RU", { maximumFractionDigits: 4 });
+  return n.toPrecision(4);
 }
-
-const NETWORKS: Network[] = [
-  { id: "eth", name: "Ethereum (ERC-20)", symbol: "ETH", confirmations: 12, minDeposit: 50, fee: "~$2.40" },
-  { id: "tron", name: "Tron (TRC-20)", symbol: "TRX", confirmations: 20, minDeposit: 10, fee: "~$1.00" },
-  { id: "bnb", name: "BNB Smart Chain", symbol: "BNB", confirmations: 15, minDeposit: 20, fee: "~$0.50" },
-  { id: "btc", name: "Bitcoin Network", symbol: "BTC", confirmations: 3, minDeposit: 100, fee: "~$5.00" }
-];
-
-const MOCK_HISTORY: Transaction[] = [
-  { id: "tx001", type: "deposit", asset: "USDT", amount: 10000, usdValue: 10000, status: "completed", date: "2026-02-20T14:22:00Z", hash: "0xab12...f89d" },
-  { id: "tx002", type: "withdraw", asset: "ETH", amount: 0.5, usdValue: 1714.45, status: "completed", date: "2026-02-18T09:11:00Z", hash: "0xcd34...a12e" },
-  { id: "tx003", type: "exchange", asset: "BTC → USDT", amount: 0.1, usdValue: 6854.72, status: "completed", date: "2026-02-15T18:05:00Z" },
-  { id: "tx004", type: "deposit", asset: "BTC", amount: 0.2, usdValue: 13709.44, status: "pending", date: "2026-02-23T22:40:00Z", hash: "0xef56...b34f" },
-  { id: "tx005", type: "withdraw", asset: "USDT", amount: 2000, usdValue: 2000, status: "failed", date: "2026-02-10T07:30:00Z" },
-  { id: "tx006", type: "deposit", asset: "ETH", amount: 2.0, usdValue: 6857.82, status: "completed", date: "2026-02-08T11:14:00Z", hash: "0xaa78...c56d" }
-];
-
-const MOCK_ADDRESS = "0x3fA9...D12E";
-const MOCK_ADDRESS_FULL = "0x3fA9b8C2Df7e4F1A0E63B5d91C8723A4f2E1D12E";
-
-function formatDate(iso: string, locale: string) {
-  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
-}
-
-function formatCurrency(v: number, locale: string) {
-  return new Intl.NumberFormat(locale, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(v);
-}
-
-const LOCALE_TAG: Record<string, string> = { ru: "ru-RU", en: "en-US", de: "de-DE" };
 
 export function WalletScreen() {
-  const { t, locale } = useI18n();
-  const [activeTab, setActiveTab] = useState<WalletTab>("deposit");
-  const [selectedNetwork, setSelectedNetwork] = useState<Network>(NETWORKS[0]!);
-  const [copied, setCopied] = useState(false);
-  const [withdrawAsset, setWithdrawAsset] = useState("USDT");
-  const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [withdrawAddress, setWithdrawAddress] = useState("");
-  const [withdrawSuccess, setWithdrawSuccess] = useState(false);
-  const [fromAsset, setFromAsset] = useState("BTC");
-  const [toAsset, setToAsset] = useState("USDT");
-  const [exchangeAmount, setExchangeAmount] = useState("");
-  const [historyFilter, setHistoryFilter] = useState<"all" | "deposit" | "withdraw" | "exchange">("all");
+  const { state, initiateDeposit, initiateWithdrawal } = useExchange();
+  const [tab, setTab] = useState<Tab>("balances");
+  const [selAsset, setSelAsset] = useState("USDT");
+  const [wdAddress, setWdAddress] = useState("");
+  const [wdAmount, setWdAmount] = useState("");
+  const [wdError, setWdError] = useState("");
+  const [wdSubmitting, setWdSubmitting] = useState(false);
+  const [activeDeposit, setActiveDeposit] = useState<DepositRecord | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [copiedAddr, setCopiedAddr] = useState(false);
 
-  const localeTag = LOCALE_TAG[locale] ?? "en-US";
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }
 
-  const tabs: { id: WalletTab; label: string }[] = [
-    { id: "deposit", label: t("wallet.tab.deposit") },
-    { id: "withdraw", label: t("wallet.tab.withdraw") },
-    { id: "exchange", label: t("wallet.tab.exchange") },
-    { id: "history", label: t("wallet.tab.history") }
+  function handleDeposit() {
+    const dep = initiateDeposit(selAsset);
+    setActiveDeposit(dep);
+    showToast(`Адрес для пополнения ${selAsset} создан`);
+  }
+
+  function handleWithdraw() {
+    setWdError("");
+    if (!wdAddress.trim()) { setWdError("Укажите адрес"); return; }
+    const amount = parseFloat(wdAmount);
+    if (!amount || amount <= 0) { setWdError("Укажите сумму"); return; }
+
+    setWdSubmitting(true);
+    setTimeout(() => {
+      const r = initiateWithdrawal(selAsset, amount, wdAddress.trim());
+      setWdSubmitting(false);
+      if (r.ok) {
+        setWdAddress(""); setWdAmount("");
+        showToast("Вывод инициирован");
+        setTab("history");
+      } else {
+        setWdError(r.error ?? "Ошибка");
+      }
+    }, 800);
+  }
+
+  function handleCopyAddr(addr: string) {
+    navigator.clipboard.writeText(addr).catch(() => {});
+    setCopiedAddr(true);
+    setTimeout(() => setCopiedAddr(false), 1500);
+  }
+
+  const asset = state.assets[selAsset] ?? { symbol: selAsset, available: 0, locked: 0 };
+  const tk = state.tickers[`${selAsset}/USDT`];
+  const usdtPrice = selAsset === "USDT" ? 1 : (tk?.price ?? 0);
+  const totalAsset = asset.available + asset.locked;
+
+  const WD_FEES: Record<string, number> = { BTC: 0.0002, ETH: 0.003, SOL: 0.008, BNB: 0.001, USDT: 1 };
+  const wdFee = WD_FEES[selAsset] ?? 0.5;
+  const wdAmountNum = parseFloat(wdAmount || "0");
+  const wdNetAmount = Math.max(0, wdAmountNum - wdFee);
+
+  const allHistory = [
+    ...state.deposits.map((d) => ({ ...d, kind: "deposit" as const })),
+    ...state.withdrawals.map((w) => ({ ...w, kind: "withdrawal" as const })),
+  ].sort((a, b) => b.createdAt - a.createdAt);
+
+  const TABS: { key: Tab; label: string }[] = [
+    { key: "balances", label: "Балансы" },
+    { key: "deposit",  label: "Пополнить" },
+    { key: "withdraw", label: "Вывести" },
+    { key: "history",  label: "История" },
   ];
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(MOCK_ADDRESS_FULL).catch(() => undefined);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const filteredHistory = historyFilter === "all"
-    ? MOCK_HISTORY
-    : MOCK_HISTORY.filter((tx) => tx.type === historyFilter);
-
-  const estimatedReceive = exchangeAmount && !isNaN(+exchangeAmount)
-    ? fromAsset === "BTC" ? (+exchangeAmount * 68547.2 * 0.998).toFixed(2)
-    : fromAsset === "ETH" ? (+exchangeAmount * 3428.91 * 0.998).toFixed(2)
-    : (+exchangeAmount * 0.998).toFixed(2)
-    : "–";
-
   return (
-    <main className="dashboard-shell pb-24">
-      <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-4 px-4 pt-5 sm:px-6">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: EASE }}
-          className="institution-card p-4 sm:p-5"
-        >
-          <div className="flex items-center gap-3">
-            <span className="brand-emblem">
-              <WalletGlyph />
-            </span>
-            <div>
-              <h1 className="font-display text-[20px] font-semibold tracking-[-0.02em] text-textPrimary">{t("wallet.title")}</h1>
-              <p className="text-xs text-textSecondary">{t("wallet.subtitle")}</p>
-            </div>
-          </div>
-        </motion.div>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
 
-        {/* Tabs */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.2, delay: 0.06, ease: EASE }}
-          className="flex gap-1 rounded-[14px] border border-soft bg-surface/60 p-1"
-          style={{ background: "rgba(11,20,35,0.7)" }}
-        >
-          {tabs.map((tab) => (
+      {/* Header */}
+      <div style={{
+        padding: "14px 16px 0",
+        background: "var(--bg-0)",
+        borderBottom: "1px solid var(--line-1)",
+      }}>
+        <h1 style={{ margin: "0 0 12px", fontSize: 20, fontWeight: 700, color: "var(--text-1)" }}>
+          Кошелёк
+        </h1>
+
+        {/* Табы */}
+        <div style={{ display: "flex", gap: 0, overflowX: "auto" }}>
+          {TABS.map((t) => (
             <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={cx(
-                "flex-1 rounded-[10px] px-2 py-2.5 text-xs font-semibold uppercase tracking-[0.1em] transition-colors duration-150",
-                activeTab === tab.id
-                  ? "bg-trust/20 text-trust"
-                  : "text-textSecondary hover:text-textPrimary"
-              )}
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              style={{
+                padding: "9px 16px", background: "none", border: "none",
+                fontSize: 13, fontWeight: tab === t.key ? 600 : 400,
+                color: tab === t.key ? "var(--accent)" : "var(--text-3)",
+                borderBottom: `2px solid ${tab === t.key ? "var(--accent)" : "transparent"}`,
+                cursor: "pointer", whiteSpace: "nowrap", marginBottom: -1,
+                transition: "all var(--dur-fast)",
+              }}
             >
-              {tab.label}
+              {t.label}
             </button>
           ))}
-        </motion.div>
+        </div>
+      </div>
 
-        {/* Content */}
+      {/* Контент */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px calc(var(--nav-height) + var(--safe-bottom) + 16px)" }}>
         <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-            transition={{ duration: 0.2, ease: EASE }}
-          >
-            {/* DEPOSIT */}
-            {activeTab === "deposit" && (
-              <div className="space-y-3">
-                <section className="institution-card p-5">
-                  <p className="mb-3 text-xs uppercase tracking-[0.16em] text-textSecondary">{t("wallet.deposit.network")}</p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {NETWORKS.map((network) => (
-                      <button
-                        key={network.id}
-                        type="button"
-                        onClick={() => setSelectedNetwork(network)}
-                        className={cx(
-                          "rounded-[12px] border px-3 py-3 text-left transition-all duration-150",
-                          selectedNetwork.id === network.id
-                            ? "border-trust/50 bg-trust/10"
-                            : "border-soft bg-slate-900/30 hover:border-soft/60"
-                        )}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-textPrimary">{network.symbol}</p>
-                            <p className="text-xs text-textSecondary">{network.name}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-[11px] text-textSecondary">{t("wallet.deposit.fee")} {network.fee}</p>
-                            <p className="text-[11px] text-textSecondary">{network.confirmations} {t("wallet.deposit.confirmations")}</p>
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="institution-card p-5">
-                  <p className="mb-3 text-xs uppercase tracking-[0.16em] text-textSecondary">{t("wallet.deposit.address")}</p>
-
-                  {/* QR mock */}
-                  <div className="mx-auto mb-4 flex h-[148px] w-[148px] items-center justify-center rounded-[16px] border border-soft bg-white/5 text-center">
-                    <QRMock />
-                  </div>
-
-                  <div className="flex items-center gap-2 rounded-[12px] border border-soft bg-slate-900/40 px-3 py-3">
-                    <p className="flex-1 truncate font-mono text-sm text-textPrimary">{MOCK_ADDRESS}</p>
-                    <button
-                      type="button"
-                      onClick={handleCopy}
-                      className={cx(
-                        "shrink-0 rounded-[8px] px-3 py-1.5 text-xs font-semibold transition-colors duration-150",
-                        copied ? "bg-profit/20 text-profit" : "bg-trust/20 text-trust"
-                      )}
-                    >
-                      {copied ? t("wallet.deposit.copied") : t("wallet.deposit.copy")}
-                    </button>
-                  </div>
-
-                  <div className="mt-3 rounded-[10px] border border-amber-500/20 bg-amber-500/8 px-3 py-2.5">
-                    <p className="text-xs font-medium text-amber-400">{t("wallet.deposit.warning")}</p>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-textSecondary">
-                    <div className="rounded-[10px] border border-soft bg-slate-900/30 px-3 py-2.5">
-                      <p className="text-[10px] uppercase tracking-[0.14em]">{t("wallet.deposit.minAmount")}</p>
-                      <p className="mt-1 text-sm font-semibold text-textPrimary">${selectedNetwork.minDeposit}</p>
-                    </div>
-                    <div className="rounded-[10px] border border-soft bg-slate-900/30 px-3 py-2.5">
-                      <p className="text-[10px] uppercase tracking-[0.14em]">{t("wallet.deposit.confirmations")}</p>
-                      <p className="mt-1 text-sm font-semibold text-textPrimary">{selectedNetwork.confirmations}</p>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            )}
-
-            {/* WITHDRAW */}
-            {activeTab === "withdraw" && (
-              <section className="institution-card p-5">
-                {withdrawSuccess ? (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.96 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="flex flex-col items-center gap-4 py-8 text-center"
+          {tab === "balances" && (
+            <motion.div
+              key="balances"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: EASE }}
+            >
+              {ASSETS.map((sym) => {
+                const a = state.assets[sym] ?? { symbol: sym, available: 0, locked: 0 };
+                const t = state.tickers[`${sym}/USDT`];
+                const total = a.available + a.locked;
+                const usdVal = sym === "USDT" ? total : total * (t?.price ?? 0);
+                return (
+                  <div
+                    key={sym}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "13px 14px", marginBottom: 2,
+                      background: "var(--surface-1)", borderRadius: "var(--r-md)",
+                      border: "1px solid var(--line-1)",
+                    }}
                   >
-                    <span className="flex h-16 w-16 items-center justify-center rounded-full border border-profit/30 bg-profit/15">
-                      <CheckGlyph />
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{
+                        width: 36, height: 36, borderRadius: "50%",
+                        background: "var(--accent-dim)", border: "1px solid var(--accent-border)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 12, fontWeight: 700, color: "var(--accent)",
+                      }}>
+                        {sym.slice(0, 2)}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text-1)" }}>{sym}</div>
+                        <div style={{ fontSize: 11, color: "var(--text-4)" }}>
+                          В ордерах: {fmtNum(a.locked)}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text-1)" }}>
+                        {fmtNum(a.available)}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-3)" }}>
+                        ≈${usdVal.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </motion.div>
+          )}
+
+          {tab === "deposit" && (
+            <motion.div
+              key="deposit"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: EASE }}
+            >
+              {/* Выбор актива */}
+              <AssetSelector assets={ASSETS} value={selAsset} onChange={setSelAsset} />
+
+              {/* Баланс */}
+              <div style={{
+                background: "var(--surface-2)", borderRadius: "var(--r-md)",
+                padding: "12px 14px", marginBottom: 14,
+                border: "1px solid var(--line-1)", display: "flex", justifyContent: "space-between",
+              }}>
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>Текущий баланс</span>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-1)" }}>
+                  {fmtNum(totalAsset)} {selAsset}
+                </span>
+              </div>
+
+              {/* Кнопка получить адрес */}
+              {!activeDeposit ? (
+                <button
+                  onClick={handleDeposit}
+                  style={{
+                    width: "100%", padding: "13px",
+                    background: "var(--accent)", border: "none",
+                    borderRadius: "var(--r-md)", color: "#fff",
+                    fontSize: 14, fontWeight: 700, cursor: "pointer",
+                    marginBottom: 14,
+                  }}
+                >
+                  Получить адрес {selAsset}
+                </button>
+              ) : (
+                <div style={{
+                  background: "var(--surface-1)", borderRadius: "var(--r-lg)",
+                  padding: "16px", border: "1px solid var(--line-1)", marginBottom: 14,
+                }}>
+                  <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 8 }}>
+                    Адрес для пополнения {selAsset}
+                  </div>
+
+                  {/* Mock QR */}
+                  <div style={{
+                    width: 100, height: 100, margin: "0 auto 12px",
+                    background: "var(--surface-2)", borderRadius: "var(--r-sm)",
+                    border: "1px solid var(--line-2)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 9, color: "var(--text-4)", textAlign: "center",
+                  }}>
+                    QR<br />mock
+                  </div>
+
+                  <div style={{
+                    background: "var(--surface-2)", borderRadius: "var(--r-sm)",
+                    padding: "10px 12px", fontSize: 11,
+                    color: "var(--text-2)", wordBreak: "break-all",
+                    border: "1px solid var(--line-1)", marginBottom: 10,
+                    fontFamily: "monospace",
+                  }}>
+                    {activeDeposit.address}
+                  </div>
+
+                  <button
+                    onClick={() => handleCopyAddr(activeDeposit.address)}
+                    style={{
+                      width: "100%", padding: "10px",
+                      background: copiedAddr ? "var(--pos-dim)" : "var(--surface-3)",
+                      border: `1px solid ${copiedAddr ? "var(--pos-border)" : "var(--line-1)"}`,
+                      borderRadius: "var(--r-sm)",
+                      color: copiedAddr ? "var(--pos)" : "var(--text-2)",
+                      fontSize: 13, fontWeight: 600, cursor: "pointer",
+                      marginBottom: 12,
+                      transition: "all var(--dur-fast)",
+                    }}
+                  >
+                    {copiedAddr ? "✓ Скопировано" : "Скопировать адрес"}
+                  </button>
+
+                  {/* Статус */}
+                  <DepositStatus dep={activeDeposit} />
+                </div>
+              )}
+
+              <div style={{
+                fontSize: 11, color: "var(--text-4)",
+                background: "var(--warn-dim)", borderRadius: "var(--r-sm)",
+                padding: "8px 12px", border: "1px solid var(--warn)",
+              }}>
+                ⚠️ Отправляйте только {selAsset} на этот адрес
+              </div>
+            </motion.div>
+          )}
+
+          {tab === "withdraw" && (
+            <motion.div
+              key="withdraw"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: EASE }}
+            >
+              {!state.user?.emailVerified ? (
+                <div style={{
+                  background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
+                  borderRadius: "var(--r-md)", padding: "16px", textAlign: "center",
+                }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
+                  <div style={{ fontWeight: 600, color: "var(--text-1)", marginBottom: 6 }}>
+                    Email не подтверждён
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--text-3)" }}>
+                    Для вывода средств необходимо подтвердить email
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <AssetSelector assets={ASSETS} value={selAsset} onChange={setSelAsset} />
+
+                  <div style={{
+                    background: "var(--surface-2)", borderRadius: "var(--r-md)",
+                    padding: "10px 14px", marginBottom: 14,
+                    border: "1px solid var(--line-1)", display: "flex", justifyContent: "space-between",
+                  }}>
+                    <span style={{ fontSize: 12, color: "var(--text-3)" }}>Доступно</span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-1)" }}>
+                      {fmtNum(asset.available)} {selAsset}
+                      {usdtPrice > 0 && (
+                        <span style={{ fontSize: 11, color: "var(--text-4)", marginLeft: 6 }}>
+                          ≈${(asset.available * usdtPrice).toFixed(2)}
+                        </span>
+                      )}
                     </span>
-                    <div>
-                      <p className="text-lg font-semibold text-textPrimary">{t("wallet.withdraw.success.title")}</p>
-                      <p className="mt-1 text-sm text-textSecondary">{t("wallet.withdraw.success.subtitle")}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { setWithdrawSuccess(false); setWithdrawAmount(""); setWithdrawAddress(""); }}
-                      className="rounded-[12px] border border-trust/30 bg-trust/12 px-5 py-2.5 text-sm font-semibold text-trust"
-                    >
-                      {t("wallet.withdraw.success.new")}
-                    </button>
-                  </motion.div>
-                ) : (
-                  <div className="space-y-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-textSecondary">{t("wallet.withdraw.asset")}</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {["USDT", "ETH", "BTC"].map((asset) => (
-                        <button
-                          key={asset}
-                          type="button"
-                          onClick={() => setWithdrawAsset(asset)}
-                          className={cx(
-                            "rounded-[11px] border py-2.5 text-sm font-semibold transition-colors duration-150",
-                            withdrawAsset === asset
-                              ? "border-trust/50 bg-trust/12 text-trust"
-                              : "border-soft bg-slate-900/30 text-textSecondary"
-                          )}
-                        >
-                          {asset}
-                        </button>
-                      ))}
-                    </div>
+                  </div>
 
-                    <label className="block">
-                      <span className="mb-2 block text-sm font-medium text-textSecondary">{t("wallet.withdraw.address")}</span>
-                      <input
-                        type="text"
-                        value={withdrawAddress}
-                        onChange={(e) => setWithdrawAddress(e.target.value)}
-                        placeholder="0x..."
-                        className="onboarding-input font-mono text-sm"
-                      />
-                    </label>
+                  {/* Адрес */}
+                  <label style={{ display: "block", marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>Адрес назначения</div>
+                    <input
+                      type="text"
+                      placeholder="Введите адрес..."
+                      value={wdAddress}
+                      onChange={(e) => { setWdAddress(e.target.value); setWdError(""); }}
+                      style={{
+                        width: "100%", padding: "11px 14px",
+                        background: "var(--surface-2)", border: "1px solid var(--line-2)",
+                        borderRadius: "var(--r-md)", color: "var(--text-1)",
+                        fontSize: 14, outline: "none",
+                        fontFamily: "monospace",
+                      }}
+                    />
+                  </label>
 
-                    <label className="block">
-                      <span className="mb-2 block text-sm font-medium text-textSecondary">{t("wallet.withdraw.amount")} ({withdrawAsset})</span>
+                  {/* Сумма */}
+                  <label style={{ display: "block", marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 6 }}>Сумма ({selAsset})</div>
+                    <div style={{ position: "relative" }}>
                       <input
                         type="number"
-                        value={withdrawAmount}
-                        onChange={(e) => setWithdrawAmount(e.target.value)}
                         placeholder="0.00"
-                        min="0"
-                        className="onboarding-input"
+                        value={wdAmount}
+                        onChange={(e) => { setWdAmount(e.target.value); setWdError(""); }}
+                        style={{
+                          width: "100%", padding: "11px 70px 11px 14px",
+                          background: "var(--surface-2)", border: "1px solid var(--line-2)",
+                          borderRadius: "var(--r-md)", color: "var(--text-1)",
+                          fontSize: 14, outline: "none",
+                        }}
                       />
-                    </label>
-
-                    <div className="rounded-[12px] border border-soft bg-slate-900/30 px-4 py-3">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-textSecondary">{t("wallet.withdraw.networkFee")}</span>
-                        <span className="font-semibold text-textPrimary">~$2.40</span>
-                      </div>
-                      <div className="mt-1.5 flex justify-between text-xs">
-                        <span className="text-textSecondary">{t("wallet.withdraw.processing")}</span>
-                        <span className="font-semibold text-textPrimary">~30 min</span>
-                      </div>
-                    </div>
-
-                    <motion.button
-                      type="button"
-                      whileTap={{ scale: 0.98 }}
-                      disabled={!withdrawAddress || !withdrawAmount || isNaN(+withdrawAmount) || +withdrawAmount <= 0}
-                      onClick={() => setWithdrawSuccess(true)}
-                      className="primary-action-button"
-                    >
-                      {t("wallet.withdraw.submit")}
-                    </motion.button>
-                  </div>
-                )}
-              </section>
-            )}
-
-            {/* EXCHANGE */}
-            {activeTab === "exchange" && (
-              <section className="institution-card p-5 space-y-4">
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.16em] text-textSecondary">{t("wallet.exchange.from")}</p>
-                  <div className="flex gap-2">
-                    <div className="flex gap-1">
-                      {["BTC", "ETH", "USDT"].map((a) => (
-                        <button key={a} type="button" onClick={() => setFromAsset(a)}
-                          className={cx("rounded-[10px] border px-3 py-1.5 text-xs font-semibold transition-colors duration-150",
-                            fromAsset === a ? "border-trust/50 bg-trust/12 text-trust" : "border-soft bg-slate-900/30 text-textSecondary")}
-                        >{a}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <input
-                    type="number" value={exchangeAmount}
-                    onChange={(e) => setExchangeAmount(e.target.value)}
-                    placeholder="0.00" min="0"
-                    className="onboarding-input"
-                  />
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-px bg-soft/40" />
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full border border-trust/30 bg-trust/12 text-trust">
-                    <SwapGlyph />
-                  </div>
-                  <div className="flex-1 h-px bg-soft/40" />
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.16em] text-textSecondary">{t("wallet.exchange.to")}</p>
-                  <div className="flex gap-1">
-                    {["BTC", "ETH", "USDT"].filter((a) => a !== fromAsset).map((a) => (
-                      <button key={a} type="button" onClick={() => setToAsset(a)}
-                        className={cx("rounded-[10px] border px-3 py-1.5 text-xs font-semibold transition-colors duration-150",
-                          toAsset === a ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-400" : "border-soft bg-slate-900/30 text-textSecondary")}
-                      >{a}</button>
-                    ))}
-                  </div>
-                  <div className="rounded-[12px] border border-soft bg-slate-900/40 px-4 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-textSecondary">{t("wallet.exchange.estimated")}</p>
-                    <p className="mt-1 font-display text-xl font-semibold text-textPrimary">
-                      {estimatedReceive} <span className="text-sm text-textSecondary">{toAsset !== fromAsset ? toAsset : "USDT"}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-[12px] border border-soft bg-slate-900/30 px-4 py-3">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-textSecondary">{t("wallet.exchange.rate")}</span>
-                    <span className="font-semibold text-textPrimary">1 {fromAsset} ≈ {fromAsset === "BTC" ? "$68,547" : fromAsset === "ETH" ? "$3,428" : "$1.00"}</span>
-                  </div>
-                  <div className="mt-1.5 flex justify-between text-xs">
-                    <span className="text-textSecondary">{t("wallet.exchange.fee")}</span>
-                    <span className="font-semibold text-textPrimary">0.2%</span>
-                  </div>
-                </div>
-
-                <motion.button
-                  type="button"
-                  whileTap={{ scale: 0.98 }}
-                  disabled={!exchangeAmount || isNaN(+exchangeAmount) || +exchangeAmount <= 0 || fromAsset === toAsset}
-                  className="primary-action-button"
-                >
-                  {t("wallet.exchange.submit")}
-                </motion.button>
-              </section>
-            )}
-
-            {/* HISTORY */}
-            {activeTab === "history" && (
-              <div className="space-y-3">
-                <div className="flex gap-1.5 overflow-x-auto pb-1">
-                  {(["all", "deposit", "withdraw", "exchange"] as const).map((filter) => (
-                    <button
-                      key={filter}
-                      type="button"
-                      onClick={() => setHistoryFilter(filter)}
-                      className={cx(
-                        "shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors duration-150",
-                        historyFilter === filter
-                          ? "border-trust/40 bg-trust/14 text-trust"
-                          : "border-soft bg-slate-900/40 text-textSecondary"
-                      )}
-                    >
-                      {t(`wallet.history.filter.${filter}`)}
-                    </button>
-                  ))}
-                </div>
-
-                <section className="institution-card divide-y divide-soft/50 overflow-hidden">
-                  {filteredHistory.length === 0 ? (
-                    <div className="flex flex-col items-center gap-2 py-12 text-center">
-                      <span className="text-2xl opacity-30">📋</span>
-                      <p className="text-sm text-textSecondary">{t("wallet.history.empty")}</p>
-                    </div>
-                  ) : (
-                    filteredHistory.map((tx, index) => (
-                      <motion.div
-                        key={tx.id}
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.18, delay: index * 0.05, ease: EASE }}
-                        className="flex items-center justify-between gap-3 px-4 py-3.5"
+                      <button
+                        onClick={() => setWdAmount(asset.available.toString())}
+                        style={{
+                          position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                          background: "var(--accent-dim)", border: "1px solid var(--accent-border)",
+                          borderRadius: 6, color: "var(--accent)",
+                          padding: "3px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                        }}
                       >
-                        <div className="flex items-center gap-3">
-                          <span className={cx(
-                            "flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border",
-                            tx.type === "deposit" ? "border-profit/30 bg-profit/10 text-profit"
-                              : tx.type === "withdraw" ? "border-loss/30 bg-loss/10 text-loss"
-                              : "border-trust/30 bg-trust/10 text-trust"
-                          )}>
-                            {tx.type === "deposit" ? <ArrowDownGlyph /> : tx.type === "withdraw" ? <ArrowUpGlyph /> : <SwapGlyph />}
-                          </span>
-                          <div>
-                            <p className="text-sm font-semibold capitalize text-textPrimary">{t(`wallet.history.type.${tx.type}`)}</p>
-                            <p className="text-xs text-textSecondary">{tx.asset} · {formatDate(tx.date, localeTag)}</p>
-                            {tx.hash && <p className="mt-0.5 font-mono text-[10px] text-textSecondary/60">{tx.hash}</p>}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className={cx(
-                            "text-sm font-semibold",
-                            tx.type === "deposit" ? "text-profit" : tx.type === "withdraw" ? "text-loss" : "text-textPrimary"
-                          )}>
-                            {tx.type === "deposit" ? "+" : tx.type === "withdraw" ? "−" : ""}{tx.amount} {tx.asset.split(" ")[0]}
-                          </p>
-                          <p className="text-xs text-textSecondary">{formatCurrency(tx.usdValue, localeTag)}</p>
-                          <span className={cx(
-                            "mt-0.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                            tx.status === "completed" ? "bg-profit/15 text-profit"
-                              : tx.status === "pending" ? "bg-amber-400/15 text-amber-400"
-                              : "bg-loss/15 text-loss"
-                          )}>
-                            {t(`wallet.history.status.${tx.status}`)}
-                          </span>
-                        </div>
-                      </motion.div>
-                    ))
+                        Макс
+                      </button>
+                    </div>
+                  </label>
+
+                  {/* Инфо о комиссии */}
+                  {wdAmountNum > 0 && (
+                    <div style={{
+                      background: "var(--surface-2)", borderRadius: "var(--r-sm)",
+                      padding: "10px 12px", marginBottom: 14,
+                      border: "1px solid var(--line-1)", fontSize: 12,
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ color: "var(--text-3)" }}>Сетевая комиссия</span>
+                        <span style={{ color: "var(--text-2)" }}>{wdFee} {selAsset}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "var(--text-3)" }}>Вы получите</span>
+                        <span style={{ color: "var(--pos)", fontWeight: 600 }}>
+                          {fmtNum(wdNetAmount)} {selAsset}
+                        </span>
+                      </div>
+                    </div>
                   )}
-                </section>
-              </div>
-            )}
-          </motion.div>
+
+                  {wdError && (
+                    <div style={{ color: "var(--neg)", fontSize: 12, marginBottom: 10 }}>{wdError}</div>
+                  )}
+
+                  <button
+                    onClick={handleWithdraw}
+                    disabled={wdSubmitting}
+                    style={{
+                      width: "100%", padding: "13px",
+                      background: wdSubmitting ? "var(--surface-3)" : "var(--accent)",
+                      border: "none", borderRadius: "var(--r-md)",
+                      color: wdSubmitting ? "var(--text-4)" : "#fff",
+                      fontSize: 14, fontWeight: 700, cursor: wdSubmitting ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {wdSubmitting ? "Обрабатываем..." : "Подтвердить вывод"}
+                  </button>
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {tab === "history" && (
+            <motion.div
+              key="history"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: EASE }}
+            >
+              {allHistory.length === 0 ? (
+                <div style={{
+                  padding: "40px 0", textAlign: "center",
+                  color: "var(--text-4)", fontSize: 13,
+                }}>
+                  История пуста
+                </div>
+              ) : allHistory.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+                    padding: "12px 14px", marginBottom: 2,
+                    background: "var(--surface-1)", borderRadius: "var(--r-md)",
+                    border: "1px solid var(--line-1)", gap: 12,
+                  }}
+                >
+                  <div style={{
+                    width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                    background: item.kind === "deposit" ? "var(--pos-dim)" : "var(--accent-dim)",
+                    border: `1px solid ${item.kind === "deposit" ? "var(--pos-border)" : "var(--accent-border)"}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 14,
+                  }}>
+                    {item.kind === "deposit" ? "⬇" : "⬆"}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-1)" }}>
+                      {item.kind === "deposit" ? "Пополнение" : "Вывод"} {item.asset}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-4)" }}>
+                      {fmtDate(item.createdAt)}
+                    </div>
+                    {item.kind === "deposit" && item.status !== "pending" && (
+                      <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2 }}>
+                        {item.confirmations}/{item.requiredConfirmations} подтверждений
+                      </div>
+                    )}
+                    {item.kind === "withdrawal" && (item as WithdrawRecord).txHash && (
+                      <div style={{ fontSize: 10, color: "var(--text-4)", fontFamily: "monospace", marginTop: 2 }}>
+                        {(item as WithdrawRecord).txHash?.slice(0, 18)}...
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-1)" }}>
+                      {item.amount > 0 ? fmtNum(item.amount) : "—"} {item.asset}
+                    </div>
+                    <div style={{
+                      fontSize: 11, fontWeight: 500,
+                      color: STATUS_COLOR[item.status],
+                    }}>
+                      {STATUS_LABEL[item.status]}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
-    </main>
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            style={{
+              position: "absolute",
+              bottom: "calc(var(--nav-height) + var(--safe-bottom) + 12px)",
+              left: "50%", transform: "translateX(-50%)",
+              background: "var(--pos)", color: "#fff",
+              padding: "10px 20px", borderRadius: 20,
+              fontSize: 13, fontWeight: 600,
+              boxShadow: "0 4px 16px rgba(0,0,0,.4)",
+              whiteSpace: "nowrap", zIndex: 70,
+            }}
+          >
+            {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
-function QRMock() {
-  const cells: boolean[] = [];
-  const seed = 0x5a3f;
-  for (let i = 0; i < 100; i++) {
-    cells.push(((seed * (i + 1) * 0x1234) % 7) > 2);
-  }
+// ─── Компоненты ───────────────────────────────────────────────────────────────
+
+function AssetSelector({ assets, value, onChange }: { assets: string[]; value: string; onChange: (v: string) => void }) {
   return (
-    <div className="grid" style={{ gridTemplateColumns: "repeat(10, 10px)", gap: "2px" }}>
-      {cells.map((on, i) => (
-        <div key={i} style={{ width: 10, height: 10, borderRadius: 2, background: on ? "rgba(233,242,255,0.85)" : "rgba(233,242,255,0.07)" }} />
+    <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 2 }}>
+      {assets.map((a) => (
+        <button
+          key={a}
+          onClick={() => onChange(a)}
+          style={{
+            padding: "6px 14px", borderRadius: 20,
+            background: value === a ? "var(--accent)" : "var(--surface-2)",
+            border: `1px solid ${value === a ? "var(--accent)" : "var(--line-1)"}`,
+            color: value === a ? "#fff" : "var(--text-2)",
+            fontSize: 13, fontWeight: 500, cursor: "pointer",
+            whiteSpace: "nowrap",
+            transition: "all var(--dur-fast)",
+          }}
+        >
+          {a}
+        </button>
       ))}
     </div>
   );
 }
 
-function WalletGlyph() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="2" y="6" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M2 10h20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="17" cy="15" r="1.5" fill="currentColor" />
-      <path d="M6 6V5a2 2 0 012-2h8a2 2 0 012 2v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
+function DepositStatus({ dep }: { dep: DepositRecord }) {
+  const steps: { label: string; status: string }[] = [
+    { label: "Ожидание транзакции", status: "pending" },
+    { label: "Подтверждения", status: "confirming" },
+    { label: "Зачислено", status: "credited" },
+  ];
+  const idx = steps.findIndex((s) => s.status === dep.status);
 
-function CheckGlyph() {
   return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M5 12l5 5L20 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function SwapGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M7 7h12M19 7l-2.5-2.5M19 7l-2.5 2.5M17 17H5M5 17l2.5-2.5M5 17l2.5 2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function ArrowDownGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 5v14M5 13l7 6 7-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ArrowUpGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 19V5M5 11l7-6 7 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 8 }}>Статус пополнения</div>
+      {steps.map((step, i) => {
+        const isActive = i === idx;
+        const isDone = i < idx;
+        return (
+          <div key={step.status} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <div style={{
+              width: 20, height: 20, borderRadius: "50%", flexShrink: 0,
+              background: isDone ? "var(--pos)" : isActive ? "var(--accent)" : "var(--surface-3)",
+              border: `1px solid ${isDone ? "var(--pos)" : isActive ? "var(--accent-border)" : "var(--line-2)"}`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 10, color: isDone || isActive ? "#fff" : "var(--text-4)",
+            }}>
+              {isDone ? "✓" : i + 1}
+            </div>
+            <span style={{
+              fontSize: 12,
+              color: isDone ? "var(--pos)" : isActive ? "var(--text-1)" : "var(--text-4)",
+            }}>
+              {step.label}
+              {isActive && step.status === "confirming" && (
+                <span style={{ color: "var(--text-4)" }}>
+                  {" "}({dep.confirmations}/{dep.requiredConfirmations})
+                </span>
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }

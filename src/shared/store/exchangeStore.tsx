@@ -6,108 +6,127 @@ import type { Ticker } from "./mockEngine";
 
 // ─── Типы ────────────────────────────────────────────────────────────────────
 
-export type OrderSide = "buy" | "sell";
-export type OrderType = "market" | "limit";
-export type OrderStatus =
-  | "pending"
-  | "queued"
-  | "partial"
-  | "filled"
-  | "cancelled"
-  | "rejected";
+export type OrderSide   = "buy" | "sell";
+export type OrderType   = "market" | "limit";
+export type OrderStatus = "pending" | "queued" | "partial" | "filled" | "cancelled" | "rejected";
 
 export interface Order {
-  id: string;
-  symbol: string;
-  side: OrderSide;
-  type: OrderType;
-  price: number;       // для лимитных; для маркетных — цена исполнения
-  qty: number;
-  filledQty: number;
-  status: OrderStatus;
-  fee: number;
+  id:         string;
+  symbol:     string;
+  side:       OrderSide;
+  type:       OrderType;
+  price:      number;     // исполненная цена (market) или лимитная
+  qty:        number;
+  filledQty:  number;
+  status:     OrderStatus;
+  fee:        number;
+  feeAsset:   string;
+  createdAt:  number;
+  updatedAt:  number;
+}
+
+// Лог каждого фактического трейда (fill)
+export interface Trade {
+  id:       string;
+  orderId:  string;
+  symbol:   string;
+  side:     OrderSide;
+  price:    number;
+  qty:      number;
+  fee:      number;
   feeAsset: string;
-  createdAt: number;
-  updatedAt: number;
+  ts:       number;
+  realizedPnl?: number; // только для sell
 }
 
 export interface Asset {
-  symbol: string;
-  available: number;
-  locked: number;     // в ордерах
+  symbol:       string;
+  available:    number;
+  locked:       number;
+  avgBuyPrice:  number;   // средняя цена покупки (VWAP)
+  realizedPnl:  number;   // зафиксированная прибыль/убыток
+  totalBought:  number;   // накопленное куплено (qty) — для расчёта avg
 }
 
 export interface DepositRecord {
-  id: string;
-  asset: string;
-  amount: number;
-  address: string;
-  status: "pending" | "confirming" | "credited";
-  confirmations: number;
+  id:                    string;
+  asset:                 string;
+  amount:                number;
+  address:               string;
+  status:                "pending" | "confirming" | "credited";
+  confirmations:         number;
   requiredConfirmations: number;
-  createdAt: number;
+  createdAt:             number;
 }
 
 export interface WithdrawRecord {
-  id: string;
-  asset: string;
-  amount: number;
-  address: string;
-  fee: number;
-  status: "pending" | "processing" | "sent" | "failed";
+  id:        string;
+  asset:     string;
+  amount:    number;
+  address:   string;
+  fee:       number;
+  status:    "pending" | "processing" | "sent" | "failed";
   createdAt: number;
-  txHash?: string;
+  txHash?:   string;
 }
 
 export interface User {
-  email: string;
+  email:         string;
   emailVerified: boolean;
-  uid: string;
-  level: 1 | 2 | 3;    // уровень верификации
+  uid:           string;
+  level:         1 | 2 | 3;
 }
 
-// ─── Начальное состояние ─────────────────────────────────────────────────────
+// ─── State ───────────────────────────────────────────────────────────────────
 
 interface State {
-  user: User | null;
-  assets: Record<string, Asset>;
-  orders: Order[];
-  deposits: DepositRecord[];
+  user:        User | null;
+  assets:      Record<string, Asset>;
+  orders:      Order[];
+  trades:      Trade[];           // история исполнений
+  deposits:    DepositRecord[];
   withdrawals: WithdrawRecord[];
-  tickers: Record<string, Ticker>;
+  tickers:     Record<string, Ticker>;
+}
+
+function makeAsset(symbol: string, available = 0, locked = 0): Asset {
+  return { symbol, available, locked, avgBuyPrice: 0, realizedPnl: 0, totalBought: 0 };
 }
 
 const INITIAL_STATE: State = {
   user: null,
   assets: {
-    USDT: { symbol: "USDT", available: 10_000, locked: 0 },
-    BTC:  { symbol: "BTC",  available: 0.025,  locked: 0 },
-    ETH:  { symbol: "ETH",  available: 0.5,    locked: 0 },
-    SOL:  { symbol: "SOL",  available: 5,      locked: 0 },
-    BNB:  { symbol: "BNB",  available: 0,      locked: 0 },
+    USDT: { ...makeAsset("USDT", 10_000) },
+    BTC:  { ...makeAsset("BTC",  0.025), avgBuyPrice: 62_000, totalBought: 0.025 },
+    ETH:  { ...makeAsset("ETH",  0.5),   avgBuyPrice: 3_200,  totalBought: 0.5   },
+    SOL:  { ...makeAsset("SOL",  5),     avgBuyPrice: 160,    totalBought: 5     },
+    BNB:  { ...makeAsset("BNB",  0) },
   },
-  orders: [],
-  deposits: [],
+  orders:      [],
+  trades:      [],
+  deposits:    [],
   withdrawals: [],
-  tickers: {},
+  tickers:     {},
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
 type Action =
-  | { type: "SET_USER"; user: User | null }
-  | { type: "SET_TICKERS"; tickers: Record<string, Ticker> }
-  | { type: "PLACE_ORDER"; order: Order }
-  | { type: "UPDATE_ORDER"; id: string; patch: Partial<Order> }
-  | { type: "UPDATE_ASSET"; symbol: string; patch: Partial<Asset> }
-  | { type: "ADD_DEPOSIT"; deposit: DepositRecord }
-  | { type: "UPDATE_DEPOSIT"; id: string; patch: Partial<DepositRecord> }
-  | { type: "ADD_WITHDRAWAL"; withdrawal: WithdrawRecord }
+  | { type: "SET_USER";          user: User | null }
+  | { type: "SET_TICKERS";       tickers: Record<string, Ticker> }
+  | { type: "PLACE_ORDER";       order: Order }
+  | { type: "UPDATE_ORDER";      id: string; patch: Partial<Order> }
+  | { type: "UPDATE_ASSET";      symbol: string; patch: Partial<Asset> }
+  | { type: "ADD_TRADE";         trade: Trade }
+  | { type: "ADD_DEPOSIT";       deposit: DepositRecord }
+  | { type: "UPDATE_DEPOSIT";    id: string; patch: Partial<DepositRecord> }
+  | { type: "ADD_WITHDRAWAL";    withdrawal: WithdrawRecord }
   | { type: "UPDATE_WITHDRAWAL"; id: string; patch: Partial<WithdrawRecord> }
-  | { type: "CANCEL_ORDER"; id: string };
+  | { type: "CANCEL_ORDER";      id: string };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
+
     case "SET_USER":
       return { ...state, user: action.user };
 
@@ -120,40 +139,37 @@ function reducer(state: State, action: Action): State {
     case "UPDATE_ORDER":
       return {
         ...state,
-        orders: state.orders.map((o) =>
+        orders: state.orders.map(o =>
           o.id === action.id ? { ...o, ...action.patch, updatedAt: Date.now() } : o
         ),
       };
 
+    case "ADD_TRADE":
+      return { ...state, trades: [action.trade, ...state.trades] };
+
     case "CANCEL_ORDER": {
-      const order = state.orders.find((o) => o.id === action.id);
-      if (!order || order.status !== "queued") return state;
-      const symParts = order.symbol.split("/");
-      const base = symParts[0] ?? "";
-      const quote = symParts[1] ?? "USDT";
-      const assetKey = order.side === "buy" ? quote : base;
+      const order = state.orders.find(o => o.id === action.id);
+      if (!order || !["queued","partial","pending"].includes(order.status)) return state;
+      const [base = "", quote = "USDT"] = order.symbol.split("/");
+      const assetKey  = order.side === "buy" ? quote : base;
       const unlockAmt = order.side === "buy"
         ? (order.qty - order.filledQty) * order.price
         : (order.qty - order.filledQty);
-      const asset = state.assets[assetKey] ?? { symbol: assetKey, available: 0, locked: 0 };
+      const asset = state.assets[assetKey] ?? makeAsset(assetKey);
       return {
         ...state,
-        orders: state.orders.map((o) =>
+        orders: state.orders.map(o =>
           o.id === action.id ? { ...o, status: "cancelled" as OrderStatus, updatedAt: Date.now() } : o
         ),
         assets: {
           ...state.assets,
-          [assetKey]: {
-            ...asset,
-            available: asset.available + unlockAmt,
-            locked: Math.max(0, asset.locked - unlockAmt),
-          },
+          [assetKey]: { ...asset, available: asset.available + unlockAmt, locked: Math.max(0, asset.locked - unlockAmt) },
         },
       };
     }
 
     case "UPDATE_ASSET": {
-      const prev = state.assets[action.symbol] ?? { symbol: action.symbol, available: 0, locked: 0 };
+      const prev = state.assets[action.symbol] ?? makeAsset(action.symbol);
       return {
         ...state,
         assets: { ...state.assets, [action.symbol]: { ...prev, ...action.patch } },
@@ -164,23 +180,13 @@ function reducer(state: State, action: Action): State {
       return { ...state, deposits: [action.deposit, ...state.deposits] };
 
     case "UPDATE_DEPOSIT":
-      return {
-        ...state,
-        deposits: state.deposits.map((d) =>
-          d.id === action.id ? { ...d, ...action.patch } : d
-        ),
-      };
+      return { ...state, deposits: state.deposits.map(d => d.id === action.id ? { ...d, ...action.patch } : d) };
 
     case "ADD_WITHDRAWAL":
       return { ...state, withdrawals: [action.withdrawal, ...state.withdrawals] };
 
     case "UPDATE_WITHDRAWAL":
-      return {
-        ...state,
-        withdrawals: state.withdrawals.map((w) =>
-          w.id === action.id ? { ...w, ...action.patch } : w
-        ),
-      };
+      return { ...state, withdrawals: state.withdrawals.map(w => w.id === action.id ? { ...w, ...action.patch } : w) };
 
     default:
       return state;
@@ -190,22 +196,17 @@ function reducer(state: State, action: Action): State {
 // ─── Context ─────────────────────────────────────────────────────────────────
 
 interface ExchangeCtx {
-  state: State;
-  dispatch: React.Dispatch<Action>;
-  // Хелперы
-  login: (email: string) => void;
-  logout: () => void;
-  placeOrder: (
-    symbol: string,
-    side: OrderSide,
-    orderType: OrderType,
-    qty: number,
-    limitPrice?: number
-  ) => { ok: boolean; error?: string; order?: Order };
-  cancelOrder: (id: string) => void;
-  initiateDeposit: (asset: string) => DepositRecord;
+  state:              State;
+  dispatch:           React.Dispatch<Action>;
+  login:              (email: string) => void;
+  logout:             () => void;
+  placeOrder:         (symbol: string, side: OrderSide, type: OrderType, qty: number, limitPrice?: number) => { ok: boolean; error?: string; order?: Order };
+  cancelOrder:        (id: string) => void;
+  closePosition:      (symbol: string) => { ok: boolean; error?: string };
+  initiateDeposit:    (asset: string) => DepositRecord;
   initiateWithdrawal: (asset: string, amount: number, address: string) => { ok: boolean; error?: string };
-  totalUSDT: () => number;
+  totalUSDT:          () => number;
+  unrealizedPnl:      (symbol: string) => { pnl: number; pct: number };
 }
 
 const Ctx = createContext<ExchangeCtx | null>(null);
@@ -219,287 +220,253 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
 
   // Подписка на тикеры
   useEffect(() => {
-    const unsub = subscribeTickers((tickers) => {
-      dispatch({ type: "SET_TICKERS", tickers });
-    });
+    const unsub = subscribeTickers(tickers => dispatch({ type: "SET_TICKERS", tickers }));
     return () => { unsub(); };
   }, []);
 
-  // Симуляция исполнения лимитных ордеров
+  // ── Симуляция исполнения лимитных ордеров ──────────────────────────────────
   useEffect(() => {
     const iv = setInterval(() => {
       const st = stateRef.current;
       st.orders
-        .filter((o) => o.status === "queued" && o.type === "limit")
-        .forEach((order) => {
+        .filter(o => o.status === "queued" && o.type === "limit")
+        .forEach(order => {
           const tk = getTicker(order.symbol);
           if (!tk) return;
-          const shouldFill =
-            order.side === "buy" ? tk.ask <= order.price
-            : tk.bid >= order.price;
-          if (shouldFill) {
-            const symParts2 = order.symbol.split("/");
-            const base = symParts2[0] ?? "";
-            const quote = symParts2[1] ?? "USDT";
-            // Частичное или полное исполнение
-            const fillFrac = Math.random() > 0.4 ? 1 : Math.random() * 0.8 + 0.1;
-            const addFilled = (order.qty - order.filledQty) * fillFrac;
-            const newFilled = order.filledQty + addFilled;
-            const isFull = newFilled >= order.qty * 0.999;
-            const fee = addFilled * order.price * 0.0006; // maker 0.06%
+          const hit = order.side === "buy" ? tk.ask <= order.price : tk.bid >= order.price;
+          if (!hit) return;
 
-            dispatch({ type: "UPDATE_ORDER", id: order.id, patch: {
-              filledQty: isFull ? order.qty : newFilled,
-              status: isFull ? "filled" : "partial",
-              fee: order.fee + fee,
+          const [base = "", quote = "USDT"] = order.symbol.split("/");
+          const fillFrac   = Math.random() > 0.4 ? 1 : Math.random() * 0.8 + 0.1;
+          const addFilled  = (order.qty - order.filledQty) * fillFrac;
+          const newFilled  = order.filledQty + addFilled;
+          const isFull     = newFilled >= order.qty * 0.999;
+          const fee        = addFilled * order.price * 0.0006;
+
+          dispatch({ type: "UPDATE_ORDER", id: order.id, patch: {
+            filledQty: isFull ? order.qty : newFilled,
+            status:    isFull ? "filled" : "partial",
+            fee:       order.fee + fee,
+          }});
+
+          // Добавляем трейд
+          const trade: Trade = {
+            id:      "trd_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+            orderId: order.id, symbol: order.symbol, side: order.side,
+            price: order.price, qty: addFilled, fee, feeAsset: order.feeAsset,
+            ts: Date.now(),
+          };
+
+          if (order.side === "buy") {
+            // Обновляем avgBuyPrice
+            const baseAsset = st.assets[base] ?? makeAsset(base);
+            const oldTotal  = baseAsset.totalBought;
+            const oldAvg    = baseAsset.avgBuyPrice;
+            const newTotal  = oldTotal + addFilled;
+            const newAvg    = newTotal > 0 ? (oldAvg * oldTotal + order.price * addFilled) / newTotal : order.price;
+            dispatch({ type: "UPDATE_ASSET", symbol: base, patch: {
+              available:   baseAsset.available + addFilled,
+              avgBuyPrice: newAvg,
+              totalBought: newTotal,
             }});
-
-            // Зачислить купленный актив
-            if (order.side === "buy") {
-              const prev = st.assets[base] ?? { symbol: base, available: 0, locked: 0 };
-              dispatch({ type: "UPDATE_ASSET", symbol: base, patch: {
-                available: prev.available + addFilled,
-              }});
-              // Разблокировать потраченный USDT
-              const quoteAsset = st.assets[quote] ?? { symbol: quote, available: 0, locked: 0 };
-              dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: {
-                locked: Math.max(0, quoteAsset.locked - addFilled * order.price - fee),
-              }});
-            } else {
-              // Зачислить USDT
-              const quoteAsset = st.assets[quote] ?? { symbol: quote, available: 0, locked: 0 };
-              dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: {
-                available: quoteAsset.available + addFilled * order.price - fee,
-              }});
-              // Разблокировать базовый актив
-              const baseAsset = st.assets[base] ?? { symbol: base, available: 0, locked: 0 };
-              dispatch({ type: "UPDATE_ASSET", symbol: base, patch: {
-                locked: Math.max(0, baseAsset.locked - addFilled),
-              }});
-            }
+            const qa = st.assets[quote] ?? makeAsset(quote);
+            dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: {
+              locked: Math.max(0, qa.locked - addFilled * order.price - fee),
+            }});
+          } else {
+            // Фиксируем P&L при продаже
+            const baseAsset = st.assets[base] ?? makeAsset(base);
+            const rpnl      = (order.price - baseAsset.avgBuyPrice) * addFilled - fee;
+            trade.realizedPnl = rpnl;
+            dispatch({ type: "UPDATE_ASSET", symbol: base, patch: {
+              locked:      Math.max(0, baseAsset.locked - addFilled),
+              realizedPnl: baseAsset.realizedPnl + rpnl,
+            }});
+            const qa = st.assets[quote] ?? makeAsset(quote);
+            dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: {
+              available: qa.available + addFilled * order.price - fee,
+            }});
           }
+
+          dispatch({ type: "ADD_TRADE", trade });
         });
-    }, 1500);
+    }, 1200);
     return () => clearInterval(iv);
   }, []);
 
-  // ─── login ──────────────────────────────────────────────────────────────────
+  // ── login / logout ──────────────────────────────────────────────────────────
   const login = useCallback((email: string) => {
-    dispatch({
-      type: "SET_USER",
-      user: {
-        email,
-        emailVerified: true,
-        uid: "u_" + Math.random().toString(36).slice(2, 10),
-        level: 2,
-      },
-    });
+    dispatch({ type: "SET_USER", user: { email, emailVerified: true, uid: "u_" + Math.random().toString(36).slice(2, 10), level: 2 } });
   }, []);
 
-  const logout = useCallback(() => {
-    dispatch({ type: "SET_USER", user: null });
-  }, []);
+  const logout = useCallback(() => dispatch({ type: "SET_USER", user: null }), []);
 
-  // ─── placeOrder ─────────────────────────────────────────────────────────────
+  // ── placeOrder ──────────────────────────────────────────────────────────────
   const placeOrder = useCallback((
-    symbol: string,
-    side: OrderSide,
-    orderType: OrderType,
-    qty: number,
-    limitPrice?: number,
+    symbol: string, side: OrderSide, type: OrderType, qty: number, limitPrice?: number,
   ): { ok: boolean; error?: string; order?: Order } => {
-    const st = stateRef.current;
-    const tk = getTicker(symbol);
-    if (!tk) return { ok: false, error: "Пара не найдена" };
+    const st  = stateRef.current;
+    const tk  = getTicker(symbol);
+    if (!tk)  return { ok: false, error: "Пара не найдена" };
 
-    const execPrice = orderType === "market"
-      ? (side === "buy" ? tk.ask * (1 + 0.001) : tk.bid * (1 - 0.001))
+    const [base = "", quote = "USDT"] = symbol.split("/");
+    const execPrice = type === "market"
+      ? (side === "buy" ? tk.ask * 1.0005 : tk.bid * 0.9995)
       : (limitPrice ?? tk.price);
-
-    const symParts3 = symbol.split("/");
-    const base = symParts3[0] ?? "";
-    const quote = symParts3[1] ?? "USDT";
 
     // Проверка баланса
     if (side === "buy") {
-      const cost = qty * execPrice;
-      const feeEst = cost * 0.001;
-      const quoteAsset = st.assets[quote] ?? { symbol: quote, available: 0, locked: 0 };
-      if (quoteAsset.available < cost + feeEst) {
-        return { ok: false, error: `Недостаточно ${quote}` };
-      }
+      const cost = qty * execPrice * 1.001;
+      const qa   = st.assets[quote] ?? makeAsset(quote);
+      if (qa.available < cost) return { ok: false, error: `Недостаточно ${quote}. Нужно ${cost.toFixed(2)}, доступно ${qa.available.toFixed(2)}` };
     } else {
-      const baseAsset = st.assets[base] ?? { symbol: base, available: 0, locked: 0 };
-      if (baseAsset.available < qty) {
-        return { ok: false, error: `Недостаточно ${base}` };
-      }
+      const ba = st.assets[base] ?? makeAsset(base);
+      if (ba.available < qty) return { ok: false, error: `Недостаточно ${base}. Нужно ${qty}, доступно ${ba.available.toPrecision(4)}` };
     }
 
-    // Блокировка средств
+    // Блокируем средства
     if (side === "buy") {
       const lock = qty * execPrice * 1.001;
-      const quoteAsset = st.assets[quote]!;
-      dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: {
-        available: quoteAsset.available - lock,
-        locked: quoteAsset.locked + lock,
-      }});
+      const qa   = st.assets[quote]!;
+      dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: { available: qa.available - lock, locked: qa.locked + lock } });
     } else {
-      const baseAsset = st.assets[base]!;
-      dispatch({ type: "UPDATE_ASSET", symbol: base, patch: {
-        available: baseAsset.available - qty,
-        locked: baseAsset.locked + qty,
-      }});
+      const ba = st.assets[base]!;
+      dispatch({ type: "UPDATE_ASSET", symbol: base, patch: { available: ba.available - qty, locked: ba.locked + qty } });
     }
 
     const order: Order = {
-      id: "ord_" + Date.now().toString(36),
-      symbol, side, type: orderType,
-      price: execPrice,
-      qty, filledQty: 0,
-      status: "pending",
-      fee: 0,
-      feeAsset: side === "buy" ? (base || quote) : (quote || base),
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      id: "ord_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      symbol, side, type, price: execPrice, qty, filledQty: 0,
+      status: "pending", fee: 0, feeAsset: side === "buy" ? base : quote,
+      createdAt: Date.now(), updatedAt: Date.now(),
     };
-
     dispatch({ type: "PLACE_ORDER", order });
 
-    // Маркет — немедленное исполнение
-    if (orderType === "market") {
-      const fee = qty * execPrice * 0.001; // taker 0.10%
+    if (type === "market") {
+      // Немедленное исполнение через 350ms
       setTimeout(() => {
-        dispatch({ type: "UPDATE_ORDER", id: order.id, patch: {
-          status: "filled",
-          filledQty: qty,
-          fee,
-        }});
+        const st2  = stateRef.current;
+        const fee  = qty * execPrice * 0.001;
+        dispatch({ type: "UPDATE_ORDER", id: order.id, patch: { status: "filled", filledQty: qty, fee } });
+
+        const trade: Trade = {
+          id: "trd_" + Date.now().toString(36),
+          orderId: order.id, symbol, side,
+          price: execPrice, qty, fee, feeAsset: order.feeAsset, ts: Date.now(),
+        };
+
         if (side === "buy") {
-          const prevBase = stateRef.current.assets[base] ?? { symbol: base, available: 0, locked: 0 };
+          const ba     = st2.assets[base]  ?? makeAsset(base);
+          const qa     = st2.assets[quote] ?? makeAsset(quote);
+          const oldTot = ba.totalBought;
+          const oldAvg = ba.avgBuyPrice;
+          const newTot = oldTot + qty;
+          const newAvg = newTot > 0 ? (oldAvg * oldTot + execPrice * qty) / newTot : execPrice;
           dispatch({ type: "UPDATE_ASSET", symbol: base, patch: {
-            available: prevBase.available + qty,
+            available:   ba.available + qty,
+            avgBuyPrice: newAvg,
+            totalBought: newTot,
           }});
-          const quoteAsset = stateRef.current.assets[quote]!;
           dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: {
-            locked: Math.max(0, quoteAsset.locked - qty * execPrice * 1.001),
+            locked: Math.max(0, qa.locked - qty * execPrice * 1.001),
           }});
         } else {
-          const prevQuote = stateRef.current.assets[quote] ?? { symbol: quote, available: 0, locked: 0 };
-          dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: {
-            available: prevQuote.available + qty * execPrice - fee,
-          }});
-          const baseAsset = stateRef.current.assets[base]!;
+          const ba   = st2.assets[base]  ?? makeAsset(base);
+          const qa   = st2.assets[quote] ?? makeAsset(quote);
+          const rpnl = (execPrice - ba.avgBuyPrice) * qty - fee;
+          trade.realizedPnl = rpnl;
           dispatch({ type: "UPDATE_ASSET", symbol: base, patch: {
-            locked: Math.max(0, baseAsset.locked - qty),
+            locked:      Math.max(0, ba.locked - qty),
+            realizedPnl: ba.realizedPnl + rpnl,
+          }});
+          dispatch({ type: "UPDATE_ASSET", symbol: quote, patch: {
+            available: qa.available + qty * execPrice - fee,
           }});
         }
-      }, 400);
+
+        dispatch({ type: "ADD_TRADE", trade });
+      }, 350);
     } else {
-      // Лимит: перевести в queued
-      setTimeout(() => {
-        dispatch({ type: "UPDATE_ORDER", id: order.id, patch: { status: "queued" } });
-      }, 300);
+      setTimeout(() => dispatch({ type: "UPDATE_ORDER", id: order.id, patch: { status: "queued" } }), 200);
     }
 
     return { ok: true, order };
   }, []);
 
-  // ─── cancelOrder ────────────────────────────────────────────────────────────
-  const cancelOrder = useCallback((id: string) => {
-    dispatch({ type: "CANCEL_ORDER", id });
-  }, []);
+  // ── cancelOrder ─────────────────────────────────────────────────────────────
+  const cancelOrder = useCallback((id: string) => dispatch({ type: "CANCEL_ORDER", id }), []);
 
-  // ─── initiateDeposit ────────────────────────────────────────────────────────
+  // ── closePosition: продаём всё что есть на балансе по рынку ─────────────────
+  const closePosition = useCallback((symbol: string): { ok: boolean; error?: string } => {
+    const [base = ""] = symbol.split("/");
+    const ba = stateRef.current.assets[base];
+    if (!ba || ba.available <= 0) return { ok: false, error: "Нет открытой позиции" };
+    const result = placeOrder(symbol, "sell", "market", ba.available);
+    return result;
+  }, [placeOrder]);
+
+  // ── initiateDeposit ─────────────────────────────────────────────────────────
   const initiateDeposit = useCallback((asset: string): DepositRecord => {
-    const mockAddrs: Record<string, string> = {
+    const ADDRS: Record<string, string> = {
       USDT: "TKxXn9QaVZKgijXi2bq5JGp2RHj1XBdGQL",
       BTC:  "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
       ETH:  "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
       SOL:  "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV",
       BNB:  "bnb136ns6lfw4zs5hg4n85vdthaad7hq5m4gtkgf23",
     };
-
     const deposit: DepositRecord = {
-      id: "dep_" + Date.now().toString(36),
-      asset,
-      amount: 0,
-      address: mockAddrs[asset] ?? "mock_addr_" + asset,
-      status: "pending",
-      confirmations: 0,
+      id: "dep_" + Date.now().toString(36), asset, amount: 0,
+      address: ADDRS[asset] ?? "addr_" + asset,
+      status: "pending", confirmations: 0,
       requiredConfirmations: asset === "BTC" ? 3 : 12,
       createdAt: Date.now(),
     };
-
     dispatch({ type: "ADD_DEPOSIT", deposit });
 
-    // Симуляция подтверждений
     let conf = 0;
-    const req = deposit.requiredConfirmations;
+    const req       = deposit.requiredConfirmations;
+    const mockAmt   = asset === "USDT" ? 1000 : asset === "BTC" ? 0.01 : 0.5;
     const iv = setInterval(() => {
       conf++;
-      const mockAmount = asset === "USDT" ? 1000 : asset === "BTC" ? 0.01 : 0.5;
-      dispatch({
-        type: "UPDATE_DEPOSIT",
-        id: deposit.id,
-        patch: {
-          confirmations: conf,
-          amount: mockAmount,
-          status: conf >= req ? "credited" : "confirming",
-        },
-      });
+      dispatch({ type: "UPDATE_DEPOSIT", id: deposit.id, patch: {
+        confirmations: conf, amount: mockAmt,
+        status: conf >= req ? "credited" : "confirming",
+      }});
       if (conf >= req) {
         clearInterval(iv);
-        // Зачислить баланс
-        const prev = stateRef.current.assets[asset] ?? { symbol: asset, available: 0, locked: 0 };
-        dispatch({ type: "UPDATE_ASSET", symbol: asset, patch: {
-          available: prev.available + mockAmount,
-        }});
+        const prev = stateRef.current.assets[asset] ?? makeAsset(asset);
+        dispatch({ type: "UPDATE_ASSET", symbol: asset, patch: { available: prev.available + mockAmt } });
       }
     }, 4000);
 
     return deposit;
   }, []);
 
-  // ─── initiateWithdrawal ─────────────────────────────────────────────────────
-  const initiateWithdrawal = useCallback((
-    asset: string,
-    amount: number,
-    address: string,
-  ): { ok: boolean; error?: string } => {
-    const st = stateRef.current;
+  // ── initiateWithdrawal ──────────────────────────────────────────────────────
+  const initiateWithdrawal = useCallback((asset: string, amount: number, address: string): { ok: boolean; error?: string } => {
+    const st  = stateRef.current;
     if (!st.user?.emailVerified) return { ok: false, error: "Подтвердите email" };
-    const a = st.assets[asset];
+    const a   = st.assets[asset];
     const fee = asset === "BTC" ? 0.0002 : asset === "ETH" ? 0.003 : 1;
     if (!a || a.available < amount + fee) return { ok: false, error: `Недостаточно ${asset}` };
-    if (amount <= 0) return { ok: false, error: "Укажите сумму" };
-
-    // Списать баланс
-    dispatch({ type: "UPDATE_ASSET", symbol: asset, patch: {
-      available: a.available - amount - fee,
-    }});
-
+    if (amount <= 0)                      return { ok: false, error: "Укажите сумму" };
+    dispatch({ type: "UPDATE_ASSET", symbol: asset, patch: { available: a.available - amount - fee } });
     const rec: WithdrawRecord = {
-      id: "wdr_" + Date.now().toString(36),
-      asset, amount, address, fee,
-      status: "pending",
-      createdAt: Date.now(),
+      id: "wdr_" + Date.now().toString(36), asset, amount, address, fee,
+      status: "pending", createdAt: Date.now(),
     };
-    dispatch({ type: "ADD_WITHDRAWAL", rec } as unknown as Action);
     dispatch({ type: "ADD_WITHDRAWAL", withdrawal: rec });
-
-    // Симуляция processing → sent
     setTimeout(() => dispatch({ type: "UPDATE_WITHDRAWAL", id: rec.id, patch: { status: "processing" } }), 2000);
-    setTimeout(() => dispatch({ type: "UPDATE_WITHDRAWAL", id: rec.id, patch: { status: "sent", txHash: "0x" + Math.random().toString(16).slice(2, 18) } }), 8000);
-
+    setTimeout(() => dispatch({ type: "UPDATE_WITHDRAWAL", id: rec.id, patch: { status: "sent", txHash: "0x" + Math.random().toString(16).slice(2,18) } }), 8000);
     return { ok: true };
   }, []);
 
-  // ─── totalUSDT ──────────────────────────────────────────────────────────────
+  // ── totalUSDT ───────────────────────────────────────────────────────────────
   const totalUSDT = useCallback((): number => {
     const st = stateRef.current;
     let total = 0;
-    for (const [sym, asset] of Object.entries(st.assets)) {
-      const bal = asset.available + asset.locked;
+    for (const [sym, a] of Object.entries(st.assets)) {
+      const bal = a.available + a.locked;
       if (sym === "USDT") { total += bal; continue; }
       const tk = st.tickers[`${sym}/USDT`];
       if (tk) total += bal * tk.price;
@@ -507,8 +474,22 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
     return total;
   }, []);
 
+  // ── unrealizedPnl ───────────────────────────────────────────────────────────
+  // P&L по текущему балансу актива относительно avgBuyPrice
+  const unrealizedPnl = useCallback((symbol: string): { pnl: number; pct: number } => {
+    const st     = stateRef.current;
+    const [base] = symbol.split("/");
+    const asset  = st.assets[base ?? ""];
+    const tk     = st.tickers[symbol];
+    if (!asset || !tk || asset.avgBuyPrice === 0) return { pnl: 0, pct: 0 };
+    const qty  = asset.available + asset.locked;
+    const pnl  = (tk.price - asset.avgBuyPrice) * qty;
+    const pct  = ((tk.price - asset.avgBuyPrice) / asset.avgBuyPrice) * 100;
+    return { pnl, pct };
+  }, []);
+
   return (
-    <Ctx.Provider value={{ state, dispatch, login, logout, placeOrder, cancelOrder, initiateDeposit, initiateWithdrawal, totalUSDT }}>
+    <Ctx.Provider value={{ state, dispatch, login, logout, placeOrder, cancelOrder, closePosition, initiateDeposit, initiateWithdrawal, totalUSDT, unrealizedPnl }}>
       {children}
     </Ctx.Provider>
   );

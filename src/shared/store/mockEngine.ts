@@ -1,6 +1,95 @@
 // ─── Mock Price Engine ───────────────────────────────────────────────────────
 // Генерирует реалистичные цены с тиками 600-1200ms, bid/ask, спред, объём
 
+// ─── OHLC Candle ─────────────────────────────────────────────────────────────
+export interface Candle {
+  ts:     number;   // UNIX ms, открытие свечи
+  open:   number;
+  high:   number;
+  low:    number;
+  close:  number;
+  volume: number;
+}
+
+// Таймфреймы в миллисекундах (ускоренное время — 1 тик ≈ 1s реального)
+const TF_MS: Record<string, number> = {
+  "1м":  60_000,
+  "5м":  300_000,
+  "15м": 900_000,
+  "1ч":  3_600_000,
+  "4ч":  14_400_000,
+  "1д":  86_400_000,
+};
+
+// Хранилище свечей: candleStore[symbol][tf] = Candle[]
+const candleStore: Record<string, Record<string, Candle[]>> = {};
+// Текущие незакрытые свечи: openCandle[symbol][tf]
+const openCandle: Record<string, Record<string, Candle>> = {};
+
+// Генерируем историю свечей (50 закрытых) для всех пар/ТФ
+function initCandles() {
+  const now = Date.now();
+  for (const symbol of Object.keys(INITIAL)) {
+    candleStore[symbol] = {};
+    openCandle[symbol]  = {};
+    for (const [tf, ms] of Object.entries(TF_MS)) {
+      const BASE_PRICE = INITIAL[symbol]!.price;
+      const candles: Candle[] = [];
+      let price = BASE_PRICE * rng(0.92, 1.08);
+      for (let i = 50; i >= 1; i--) {
+        const ts   = now - i * ms;
+        const open = price;
+        const moves = 8;
+        let high = open, low = open, close = open;
+        for (let j = 0; j < moves; j++) {
+          price *= 1 + rng(-0.004, 0.004);
+          high  = Math.max(high,  price);
+          low   = Math.min(low,   price);
+          close = price;
+        }
+        candles.push({ ts, open, high, low, close, volume: rng(50, 500) * (BASE_PRICE * 0.0001) });
+      }
+      candleStore[symbol][tf] = candles;
+      // Открываем текущую свечу
+      const curTs = Math.floor(now / ms) * ms;
+      openCandle[symbol][tf] = { ts: curTs, open: price, high: price, low: price, close: price, volume: 0 };
+    }
+  }
+}
+
+export function getCandles(symbol: string, tf = "15м", count = 50): Candle[] {
+  const hist = candleStore[symbol]?.[tf] ?? [];
+  const open = openCandle[symbol]?.[tf];
+  const combined = open ? [...hist, open] : hist;
+  return combined.slice(-count);
+}
+
+// Обновление свечей при каждом тике
+function updateCandles(symbol: string, price: number, volume: number) {
+  const now = Date.now();
+  const symOpen = openCandle[symbol];
+  const symStore = candleStore[symbol];
+  if (!symOpen || !symStore) return;
+
+  for (const [tf, ms] of Object.entries(TF_MS)) {
+    const curTs = Math.floor(now / ms) * ms;
+    const candle = symOpen[tf];
+    if (!candle) continue;
+
+    if (curTs > candle.ts) {
+      // Закрываем предыдущую, открываем новую
+      symStore[tf] = [...(symStore[tf] ?? []).slice(-99), { ...candle }];
+      symOpen[tf]  = { ts: curTs, open: price, high: price, low: price, close: price, volume };
+    } else {
+      // Обновляем текущую
+      candle.high   = Math.max(candle.high, price);
+      candle.low    = Math.min(candle.low,  price);
+      candle.close  = price;
+      candle.volume += volume;
+    }
+  }
+}
+
 export interface Ticker {
   symbol: string;
   base: string;
@@ -147,6 +236,7 @@ function tick() {
     tk.low24h  = Math.min(tk.low24h,  tk.price);
     tk.change24h += rng(-0.03, 0.03);
     tk.vol24h   *= 1 + rng(-0.001, 0.001);
+    updateCandles(tk.symbol, tk.price, rng(0.01, 2));
   }
 
   for (const fn of listeners) fn({ ...state });
@@ -154,6 +244,9 @@ function tick() {
   const delay = rng(600, 1200);
   setTimeout(tick, delay);
 }
+
+// Инициализация свечей после объявления INITIAL
+initCandles();
 
 // Запустить движок
 tick();

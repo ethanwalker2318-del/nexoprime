@@ -4,6 +4,37 @@ import { useExchange } from "../../shared/store/exchangeStore";
 import { useRouter } from "../../app/providers/RouterProvider";
 import type { Order } from "../../shared/store/exchangeStore";
 
+// ─── SVG иконки быстрых действий ─────────────────────────────────────────────
+const IconTrade = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="2" width="4" height="10" rx="1"/>
+    <rect x="10" y="7" width="4" height="15" rx="1"/>
+    <rect x="18" y="4" width="4" height="12" rx="1"/>
+    <line x1="3" y1="22" x2="21" y2="22"/>
+  </svg>
+);
+const IconMarkets = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <line x1="2" y1="12" x2="22" y2="12"/>
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+  </svg>
+);
+const IconDeposit = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="8 12 12 16 16 12"/>
+    <line x1="12" y1="8" x2="12" y2="16"/>
+  </svg>
+);
+const IconWithdraw = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="16 12 12 8 8 12"/>
+    <line x1="12" y1="16" x2="12" y2="8"/>
+  </svg>
+);
+
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 function fmt(n: number, digits = 2) {
@@ -46,7 +77,7 @@ const ORDER_STATUS_COLOR: Record<string, string> = {
 };
 
 export function HomeScreen() {
-  const { state, totalUSDT, cancelOrder } = useExchange();
+  const { state, totalUSDT, cancelOrder, unrealizedPnl } = useExchange();
   const { navigate } = useRouter();
 
   const [totalBalance, setTotalBalance] = useState(0);
@@ -156,10 +187,10 @@ export function HomeScreen() {
         display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 20,
       }}>
         {[
-          { label: "Торговля", icon: "📈", screen: "trade" as const },
-          { label: "Рынки",    icon: "🌐", screen: "markets" as const },
-          { label: "Пополнить",icon: "⬇️", screen: "wallet" as const },
-          { label: "Вывести",  icon: "⬆️", screen: "wallet" as const },
+          { label: "Торговля", Icon: IconTrade,    screen: "trade"   as const, color: "var(--accent)" },
+          { label: "Рынки",    Icon: IconMarkets,  screen: "markets" as const, color: "var(--accent)" },
+          { label: "Пополнить",Icon: IconDeposit,  screen: "wallet"  as const, color: "var(--pos)"    },
+          { label: "Вывести",  Icon: IconWithdraw, screen: "wallet"  as const, color: "var(--neg)"    },
         ].map((a, i) => (
           <motion.button
             key={a.label}
@@ -175,7 +206,7 @@ export function HomeScreen() {
               transition: "background var(--dur-fast)",
             }}
           >
-            <span style={{ fontSize: 20 }}>{a.icon}</span>
+            <span style={{ color: a.color }}><a.Icon /></span>
             <span style={{ fontSize: 11, color: "var(--text-2)", fontWeight: 500 }}>{a.label}</span>
           </motion.button>
         ))}
@@ -191,6 +222,8 @@ export function HomeScreen() {
           const total = asset.available + asset.locked;
           const usdtVal = asset.symbol === "USDT" ? total : total * (tk?.price ?? 0);
           const pos = (tk?.change24h ?? 0) >= 0;
+          const { pnl, pct: pnlPct } = asset.symbol !== "USDT" ? unrealizedPnl(`${asset.symbol}/USDT`) : { pnl: 0, pct: 0 };
+          const isPnlPos = pnl >= 0;
 
           return (
             <motion.div
@@ -234,7 +267,7 @@ export function HomeScreen() {
               {/* Мини-график */}
               {tk && <Sparkline values={tk.history.slice(-20)} pos={pos} />}
 
-              {/* Баланс */}
+              {/* Баланс + P&L */}
               <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text-1)" }}>
                   {total.toPrecision(4)}
@@ -242,6 +275,18 @@ export function HomeScreen() {
                 <div style={{ fontSize: 12, color: "var(--text-3)" }}>
                   ${fmt(usdtVal, 2)}
                 </div>
+                {asset.symbol !== "USDT" && asset.avgBuyPrice > 0 && (
+                  <div style={{
+                    fontSize: 11, fontWeight: 600, marginTop: 2,
+                    color: isPnlPos ? "var(--pos)" : "var(--neg)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {pnl >= 0 ? "+" : ""}${Math.abs(pnl).toFixed(2)}
+                    <span style={{ opacity: 0.7, fontSize: 9.5, marginLeft: 2 }}>
+                      ({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%)
+                    </span>
+                  </div>
+                )}
               </div>
             </motion.div>
           );

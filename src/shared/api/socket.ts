@@ -67,6 +67,19 @@ export interface TradingToggledPayload {
   enabled: boolean;
 }
 
+export interface MarketTickPayload {
+  tickers: Record<string, {
+    symbol: string;
+    price: number;
+    bid: number;
+    ask: number;
+    change24h: number;
+    high24h: number;
+    low24h: number;
+    vol24h: number;
+  }>;
+}
+
 // ─── Event callbacks ─────────────────────────────────────────────────────────
 
 export interface SocketCallbacks {
@@ -81,6 +94,7 @@ export interface SocketCallbacks {
   onTickOverride?:        (data: TickOverridePayload) => void;
   onUpdateKyc?:           (data: UpdateKycPayload) => void;
   onTradingToggled?:      (data: TradingToggledPayload) => void;
+  onMarketTick?:          (data: MarketTickPayload) => void;
   onForceProfileRefresh?: () => void;
   onConnect?:             () => void;
   onDisconnect?:          () => void;
@@ -167,6 +181,10 @@ export function useSocket(callbacks: SocketCallbacks = {}) {
 
     socket.on("TRADING_TOGGLED", (data: TradingToggledPayload) => {
       cbRef.current.onTradingToggled?.(data);
+    });
+
+    socket.on("MARKET_TICK", (data: MarketTickPayload) => {
+      cbRef.current.onMarketTick?.(data);
     });
 
     socket.on("force-profile-refresh", () => {

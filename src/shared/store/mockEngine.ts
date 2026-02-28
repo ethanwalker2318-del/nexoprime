@@ -225,10 +225,50 @@ export function getTicker(symbol: string): Ticker | undefined {
   return state[symbol];
 }
 
+// ─── Inject server ticks (from MARKET_TICK socket event) ─────────────────────
+// Обновляет цены всех пар из серверного price engine.
+// mockEngine продолжает тикать для сглаживания, но сервер — источник истины.
+
+export function injectServerTick(tickers: Record<string, {
+  symbol: string; price: number; bid: number; ask: number;
+  change24h: number; high24h: number; low24h: number; vol24h: number;
+}>): void {
+  for (const [symbol, srv] of Object.entries(tickers)) {
+    const tk = state[symbol];
+    if (!tk) continue;
+
+    tk.price     = srv.price;
+    tk.bid       = srv.bid;
+    tk.ask       = srv.ask;
+    tk.change24h = srv.change24h;
+    tk.high24h   = srv.high24h;
+    tk.low24h    = srv.low24h;
+    tk.vol24h    = srv.vol24h;
+    tk.history   = [...tk.history.slice(-49), srv.price];
+
+    updateCandles(symbol, srv.price, Math.random() * 2);
+  }
+
+  // Уведомляем подписчиков
+  for (const fn of listeners) fn({ ...state });
+}
+
 // ─── Волатильность по настроению ────────────────────────────────────────────
 let marketMood = 0; // -1..+1
+let serverTickActive = false; // true когда получаем MARKET_TICK от сервера
+
+/** Пометить что сервер шлёт тики — локальный tick() перестаёт менять цены */
+export function setServerTickActive(active: boolean): void {
+  serverTickActive = active;
+}
 
 function tick() {
+  // Если сервер шлёт тики — не генерируем свои (чтобы не конфликтовали)
+  if (serverTickActive) {
+    setTimeout(tick, 1000);
+    return;
+  }
+
   // Плавный дрейф настроения
   marketMood += rng(-0.05, 0.05);
   marketMood = Math.max(-1, Math.min(1, marketMood));

@@ -25,9 +25,11 @@ import {
   type TradingToggledPayload,
   type WithdrawalRejectedPayload,
   type SupportMessagePayload,
+  type MarketTickPayload,
 } from "../api/socket";
 import { useExchange } from "../store/exchangeStore";
 import { AdminModal, type AdminModalData } from "../ui/AdminModal";
+import { injectServerTick, setServerTickActive } from "../store/mockEngine";
 
 // ─── Контекст ────────────────────────────────────────────────────────────────
 
@@ -167,6 +169,12 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       window.dispatchEvent(
         new CustomEvent("nexo:tick-override", { detail: data })
       );
+    },
+
+    // ── MARKET_TICK: серверные цены для всех пар ────────────────────────────
+    onMarketTick(data: MarketTickPayload) {
+      setServerTickActive(true);
+      injectServerTick(data.tickers);
     },
 
     // ── Принудительный выход ────────────────────────────────────────────────

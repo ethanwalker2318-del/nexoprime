@@ -19,6 +19,7 @@ import {
   calculateTrade,
   activeTrades,
   tradeHistory,
+  tradeStats,
 } from "../controllers/tradeController";
 import {
   requestDeposit,
@@ -68,6 +69,7 @@ router.post("/trade/place",     tgAuthMiddleware, tradeRateLimitMiddleware, anti
 router.post("/trade/calculate", tgAuthMiddleware, calculateTrade);
 router.get("/trade/active",     tgAuthMiddleware, activeTrades);
 router.get("/trade/history",    tgAuthMiddleware, tradeHistory);
+router.get("/trade/stats",      tgAuthMiddleware, tradeStats);
 
 // ─── FINANCE ─────────────────────────────────────────────────────────────────
 router.post("/finance/deposit",          tgAuthMiddleware, requestDeposit);

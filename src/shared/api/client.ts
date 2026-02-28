@@ -65,6 +65,7 @@ export const getProfile  = ()             => api.get<UserProfile>("/user/profile
 export const placeTrade  = (data: PlaceTradeReq) => api.post<PlaceTradeRes>("/trade/place", data);
 export const getActiveTrades   = ()              => api.get<Trade[]>("/trade/active");
 export const getTradeHistory   = (limit = 50)    => api.get<Trade[]>(`/trade/history?limit=${limit}`);
+export const getTradeStats     = ()              => api.get<TradeStats>("/trade/stats");
 
 /** Финансы */
 export const createDeposit     = (data: DepositReq)    => api.post<DepositRes>("/finance/deposit", data);
@@ -168,4 +169,23 @@ export interface KycReq {
   selfie_url: string;
   doc_url: string;
   country: string;
+}
+
+export interface TradeStats {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  winRate: number;
+  totalPnl: number;
+  totalStaked: number;
+  avgStake: number;
+  bestTrade:  { pnl: number; symbol: string; amount: number } | null;
+  worstTrade: { pnl: number; symbol: string; amount: number } | null;
+  pnl24h: number;
+  trades24h: number;
+  wins24h: number;
+  activeTrades: number;
+  currentStreak: number;
+  streakType: "win" | "loss" | "none";
 }

@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { placeBinaryTrade, settleBinaryTrade, getActiveTrades, getTradeHistory } from "../services/tradeService";
+import { placeBinaryTrade, settleBinaryTrade, getActiveTrades, getTradeHistory, getTradeStats } from "../services/tradeService";
 import { logEvent } from "../services/eventLogger";
 
 // ─── POST /trade/place — размещение бинарки ──────────────────────────────────
@@ -108,6 +108,18 @@ export async function tradeHistory(req: Request, res: Response): Promise<void> {
     })));
   } catch (err) {
     console.error("[tradeHistory]", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+// ─── GET /trade/stats ─────────────────────────────────────────────────────────
+
+export async function tradeStats(req: Request, res: Response): Promise<void> {
+  try {
+    const stats = await getTradeStats(req.tgUser.id);
+    res.json(stats);
+  } catch (err) {
+    console.error("[tradeStats]", err);
     res.status(500).json({ error: "Internal server error" });
   }
 }

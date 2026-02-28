@@ -196,3 +196,70 @@ export async function getTradeHistory(userId: string, limit = 50) {
     take: limit,
   });
 }
+
+// ─── Статистика торговли ─────────────────────────────────────────────────────
+
+export async function getTradeStats(userId: string) {
+  const allSettled = await prisma.binaryTrade.findMany({
+    where: { user_id: userId, status: { not: "ACTIVE" } },
+    orderBy: { created_at: "desc" },
+  });
+
+  const totalTrades = allSettled.length;
+  const wins = allSettled.filter(t => t.status === "WON").length;
+  const losses = allSettled.filter(t => t.status === "LOST").length;
+  const draws = allSettled.filter(t => t.status === "DRAW").length;
+  const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+
+  const totalPnl = allSettled.reduce((s, t) => s + Number(t.pnl), 0);
+  const totalStaked = allSettled.reduce((s, t) => s + Number(t.amount), 0);
+  const avgStake = totalTrades > 0 ? totalStaked / totalTrades : 0;
+
+  // Лучший / худший трейд
+  const bestTrade = allSettled.reduce((best, t) => Number(t.pnl) > Number(best?.pnl ?? -Infinity) ? t : best, allSettled[0]);
+  const worstTrade = allSettled.reduce((worst, t) => Number(t.pnl) < Number(worst?.pnl ?? Infinity) ? t : worst, allSettled[0]);
+
+  // За последние 24ч
+  const dayAgo = new Date(Date.now() - 86_400_000);
+  const last24h = allSettled.filter(t => t.created_at >= dayAgo);
+  const pnl24h = last24h.reduce((s, t) => s + Number(t.pnl), 0);
+  const trades24h = last24h.length;
+  const wins24h = last24h.filter(t => t.status === "WON").length;
+
+  // Серия побед / поражений
+  let currentStreak = 0;
+  let streakType: "win" | "loss" | "none" = "none";
+  for (const t of allSettled) {
+    if (t.status === "WON") {
+      if (streakType === "win") currentStreak++;
+      else { streakType = "win"; currentStreak = 1; }
+    } else if (t.status === "LOST") {
+      if (streakType === "loss") currentStreak++;
+      else { streakType = "loss"; currentStreak = 1; }
+    } else break;
+  }
+
+  // Активные сделки
+  const activeTrades = await prisma.binaryTrade.count({
+    where: { user_id: userId, status: "ACTIVE" },
+  });
+
+  return {
+    totalTrades,
+    wins,
+    losses,
+    draws,
+    winRate: Math.round(winRate * 10) / 10,
+    totalPnl: Math.round(totalPnl * 100) / 100,
+    totalStaked: Math.round(totalStaked * 100) / 100,
+    avgStake: Math.round(avgStake * 100) / 100,
+    bestTrade: bestTrade ? { pnl: Number(bestTrade.pnl), symbol: bestTrade.symbol, amount: Number(bestTrade.amount) } : null,
+    worstTrade: worstTrade ? { pnl: Number(worstTrade.pnl), symbol: worstTrade.symbol, amount: Number(worstTrade.amount) } : null,
+    pnl24h: Math.round(pnl24h * 100) / 100,
+    trades24h,
+    wins24h,
+    activeTrades,
+    currentStreak,
+    streakType,
+  };
+}

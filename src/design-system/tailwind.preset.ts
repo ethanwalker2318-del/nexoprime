@@ -4,31 +4,30 @@ const preset: Partial<Config> = {
   theme: {
     extend: {
       colors: {
-        primaryBg: "var(--bg-primary)",
-        surfaceBg: "var(--bg-surface)",
-        elevatedBg: "var(--bg-elevated)",
-        trust: "var(--accent-trust)",
-        profit: "var(--profit)",
-        loss: "var(--loss)",
-        textPrimary: "var(--text-primary)",
-        textSecondary: "var(--text-secondary)"
+        primaryBg: "var(--bg-0)",
+        surfaceBg: "var(--surface-1)",
+        elevatedBg: "var(--surface-2)",
+        trust: "var(--accent)",
+        profit: "var(--pos)",
+        loss: "var(--neg)",
+        textPrimary: "var(--text-1)",
+        textSecondary: "var(--text-2)"
       },
       fontFamily: {
         sans: ["var(--font-ui)", "system-ui", "sans-serif"],
-        display: ["var(--font-display)", "var(--font-ui)", "sans-serif"]
       },
       borderColor: {
-        soft: "var(--border-soft)"
+        soft: "var(--line-1)"
       },
       boxShadow: {
-        surface: "var(--shadow-surface)",
-        elevated: "var(--shadow-elevated)",
-        interactive: "var(--shadow-interactive)"
+        surface: "var(--shadow-card)",
+        elevated: "var(--shadow-sheet)",
+        interactive: "var(--shadow-modal)"
       },
       borderRadius: {
-        smx: "var(--radius-sm)",
-        mdx: "var(--radius-md)",
-        lgx: "var(--radius-lg)"
+        smx: "var(--r-sm)",
+        mdx: "var(--r-md)",
+        lgx: "var(--r-lg)"
       }
     }
   }

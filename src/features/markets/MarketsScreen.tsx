@@ -141,7 +141,7 @@ export function MarketsScreen() {
       </div>
 
       {/* Список */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px calc(var(--nav-height) + var(--safe-bottom) + 8px)" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 12px" }}>
         {filtered.length === 0 ? (
           <div style={{ padding: "40px 0", textAlign: "center", color: "var(--text-4)", fontSize: 13 }}>
             Ничего не найдено

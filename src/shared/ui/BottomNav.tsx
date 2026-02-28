@@ -52,7 +52,7 @@ export function BottomNav() {
   return (
     <nav
       style={{
-        position: "fixed", bottom: 0, left: 0, right: 0,
+        flexShrink: 0,
         height: "calc(var(--nav-height) + var(--safe-bottom))",
         paddingBottom: "var(--safe-bottom)",
         background: "rgba(11,18,32,0.96)",

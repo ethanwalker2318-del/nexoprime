@@ -98,7 +98,7 @@ export function HomeScreen() {
   const recentOrders = state.orders.slice(0, 5);
 
   return (
-    <div style={{ padding: "16px 16px calc(var(--nav-height) + var(--safe-bottom) + 16px)" }}>
+    <div style={{ padding: "16px 16px 24px" }}>
 
       {/* Баланс */}
       <motion.div

@@ -604,7 +604,7 @@ export function TradeScreen() {
         <div style={{ display: "flex", gap: 2, padding: "5px 10px", background: "var(--bg-0)", borderBottom: "1px solid var(--line-1)" }}>
           {TF_OPTIONS.map(tf => (
             <button key={tf} onClick={() => setTfLabel(tf)} style={{
-              padding: "3px 10px", borderRadius: 5, cursor: "pointer",
+              padding: "8px 10px", borderRadius: 5, cursor: "pointer",
               background: tfLabel === tf ? "var(--accent-dim)" : "transparent",
               border: tfLabel === tf ? "1px solid var(--accent-border)" : "1px solid transparent",
               color: tfLabel === tf ? "var(--accent)" : "var(--text-4)",
@@ -665,7 +665,7 @@ export function TradeScreen() {
             <div style={{ display: "flex", gap: 5 }}>
               {EXPIRY_OPTIONS.map((e, i) => (
                 <button key={e.label} onClick={() => setExpiryIdx(i)} style={{
-                  flex: 1, padding: "5px 0", borderRadius: 6, cursor: "pointer",
+                  flex: 1, padding: "10px 0", borderRadius: 6, cursor: "pointer",
                   background: expiryIdx === i ? "var(--accent-dim)" : "transparent",
                   border: expiryIdx === i ? "1px solid var(--accent-border)" : "1px solid var(--line-1)",
                   color: expiryIdx === i ? "var(--accent)" : "var(--text-4)",
@@ -683,7 +683,7 @@ export function TradeScreen() {
             <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
               {STAKE_PRESETS.map(p => (
                 <button key={p} onClick={() => setStake(String(p))} style={{
-                  flex: 1, padding: "5px 0", borderRadius: 6, cursor: "pointer",
+                  flex: 1, padding: "10px 0", borderRadius: 6, cursor: "pointer",
                   background: parseFloat(stake) === p ? "var(--accent-dim)" : "var(--surface-2)",
                   border: parseFloat(stake) === p ? "1px solid var(--accent-border)" : "1px solid var(--line-1)",
                   color: parseFloat(stake) === p ? "var(--accent)" : "var(--text-3)",
@@ -757,7 +757,7 @@ export function TradeScreen() {
         </div>
 
         {bottomTab === "active" && (
-          <div style={{ padding: "10px 12px", paddingBottom: "calc(10px + var(--nav-height) + var(--safe-bottom))" }}>
+          <div style={{ padding: "10px 12px 20px" }}>
             {activeOptions.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-4)", fontSize: 13 }}>
                 Нет активных опционов — сделайте первый CALL или PUT
@@ -776,7 +776,7 @@ export function TradeScreen() {
         )}
 
         {bottomTab === "history" && (
-          <div style={{ padding: "10px 12px", paddingBottom: "calc(10px + var(--nav-height) + var(--safe-bottom))" }}>
+          <div style={{ padding: "10px 12px 20px" }}>
             <HistoryStats options={allOptions} />
             {historyOpts.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-4)", fontSize: 13 }}>
@@ -793,7 +793,7 @@ export function TradeScreen() {
       <AnimatePresence>
         {showPicker && (
           <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
-            style={{ position:"absolute", inset:0, background:"rgba(7,10,15,0.85)", backdropFilter:"blur(8px)", zIndex:50, display:"flex", alignItems:"flex-end" }}
+            style={{ position:"absolute", inset:0, background:"rgba(7,10,15,0.85)", backdropFilter:"blur(8px)", zIndex:200, display:"flex", alignItems:"flex-end" }}
             onClick={() => setShowPicker(false)}
           >
             <motion.div initial={{y:"100%"}} animate={{y:0}} exit={{y:"100%"}}
@@ -835,11 +835,11 @@ export function TradeScreen() {
             initial={{opacity:0,y:20,scale:0.9}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:20,scale:0.9}}
             style={{
               position:"absolute",
-              bottom:"calc(var(--nav-height) + var(--safe-bottom) + 16px)",
+              bottom:24,
               left:"50%", transform:"translateX(-50%)",
               background: toast.ok ? "var(--pos)" : "var(--neg)",
               color:"#fff", padding:"10px 22px", borderRadius:22,
-              fontSize:13, fontWeight:600, whiteSpace:"nowrap", zIndex:70,
+              fontSize:13, fontWeight:600, whiteSpace:"nowrap", zIndex:120,
               boxShadow:"0 4px 20px rgba(0,0,0,0.5)",
             }}
           >

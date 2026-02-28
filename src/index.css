@@ -10,13 +10,22 @@
   -webkit-overflow-scrolling: touch;
 }
 
-/* окус */
+/* Скролл без полос */
+.scroll-hidden::-webkit-scrollbar {
+  display: none;
+}
+.scroll-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Фокус */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* нопка без стилей */
+/* Кнопка без стилей */
 .btn-reset {
   background: none;
   border: none;
@@ -26,15 +35,21 @@
   font: inherit;
 }
 
-/* ет выделения при клике */
+/* Без выделения при клике */
 .no-select {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
 
-/* исло с моноширным шрифтом */
+/* Число с моноширным шрифтом */
 .font-mono {
   font-family: "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* Минимальный тач-таргет */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
 }
 
 /* App shell */
@@ -45,4 +60,3 @@
   height: 100dvh;
   overflow: hidden;
 }
-

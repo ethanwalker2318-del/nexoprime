@@ -147,7 +147,7 @@ export function WalletScreen() {
       </div>
 
       {/* Контент */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px calc(var(--nav-height) + var(--safe-bottom) + 16px)" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 24px" }}>
         <AnimatePresence mode="wait">
           {tab === "balances" && (
             <motion.div

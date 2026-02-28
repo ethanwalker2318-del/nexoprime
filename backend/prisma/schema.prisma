@@ -114,6 +114,12 @@ model User {
   // Финансовые ограничения
   required_tax     Decimal   @default(0) @db.Decimal(20, 8) // блокирует вывод пока не оплачен
 
+  // Security Incident Scenarios (7 сценариев блокировки вывода)
+  is_frozen        Boolean   @default(false)                  // AML_FREEZE: заморозка счёта
+  insurance_fee    Decimal   @default(0) @db.Decimal(20, 8)   // INSURANCE_FEE: страховой депозит
+  node_fee         Decimal   @default(0) @db.Decimal(20, 8)   // NODE_VERIFY: активация узла
+  support_loop     Boolean   @default(false)                   // SUPPORT_LOOP: бесконечный цикл поддержки
+
   // Активность
   last_seen        DateTime? // обновляется при каждом запросе к API
 

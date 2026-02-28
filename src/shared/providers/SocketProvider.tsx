@@ -155,6 +155,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       window.dispatchEvent(new CustomEvent("nexo:force-profile-refresh"));
     },
 
+    // ── Server: force-profile-refresh (сценарии безопасности) ────────────────
+    onForceProfileRefresh() {
+      window.dispatchEvent(new CustomEvent("nexo:force-profile-refresh"));
+    },
+
     // ── TICK_OVERRIDE: импульсная свеча ─────────────────────────────────────
     onTickOverride(data: TickOverridePayload) {
       tickOverrideRef.current = data;
@@ -200,6 +205,17 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     <Ctx.Provider value={{ connected, emit, placeBinary, logEvent }}>
       {children}
       <AdminModal data={modalData} onClose={closeModal} />
+      {/* Индикатор потери связи */}
+      {!connected && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
+          background: "var(--neg)", color: "#fff", fontSize: 11, fontWeight: 600,
+          textAlign: "center", padding: "4px 0",
+          animation: "pulse 1.5s ease-in-out infinite",
+        }}>
+          ⚡ Подключение к серверу...
+        </div>
+      )}
     </Ctx.Provider>
   );
 }

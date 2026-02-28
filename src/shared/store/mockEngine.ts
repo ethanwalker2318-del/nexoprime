@@ -262,20 +262,51 @@ function tick() {
 initCandles();
 
 // ─── TICK_OVERRIDE listener (от сервера через SocketProvider) ────────────────
-// Когда бэкенд шлёт импульсную свечу для forced win/loss, мы инжектим цену
+// Когда бэкенд шлёт импульсную свечу для forced win/loss,
+// плавно интерполируем цену за ~800ms (easeOut) вместо мгновенного скачка
+let tickOverrideAnim: number | null = null; // requestAnimationFrame handle
+
 window.addEventListener("nexo:tick-override", ((e: CustomEvent<{ symbol: string; price: number }>) => {
-  const { symbol, price } = e.detail;
+  const { symbol, price: targetPrice } = e.detail;
   const tk = state[symbol];
   if (!tk) return;
-  tk.price = price;
-  const spread = price * 0.0004;
-  tk.bid = price - spread / 2;
-  tk.ask = price + spread / 2;
-  tk.history = [...tk.history.slice(-49), price];
-  tk.high24h = Math.max(tk.high24h, price);
-  tk.low24h  = Math.min(tk.low24h, price);
-  updateCandles(symbol, price, rng(0.5, 3));
-  for (const fn of listeners) fn({ ...state });
+
+  // Отменяем предыдущую анимацию, если она идёт
+  if (tickOverrideAnim !== null) {
+    cancelAnimationFrame(tickOverrideAnim);
+    tickOverrideAnim = null;
+  }
+
+  const startPrice = tk.price;
+  const duration = 800; // ms
+  const startTime = performance.now();
+
+  function animate() {
+    const elapsed = performance.now() - startTime;
+    const t = Math.min(elapsed / duration, 1);
+    // easeOutQuad — плавное замедление
+    const eased = t * (2 - t);
+    const currentPrice = startPrice + (targetPrice - startPrice) * eased;
+
+    tk.price = currentPrice;
+    const spread = currentPrice * 0.0004;
+    tk.bid = currentPrice - spread / 2;
+    tk.ask = currentPrice + spread / 2;
+    tk.high24h = Math.max(tk.high24h, currentPrice);
+    tk.low24h  = Math.min(tk.low24h, currentPrice);
+    updateCandles(symbol, currentPrice, rng(0.5, 3));
+    for (const fn of listeners) fn({ ...state });
+
+    if (t < 1) {
+      tickOverrideAnim = requestAnimationFrame(animate);
+    } else {
+      tickOverrideAnim = null;
+      // Финальное обновление истории
+      tk.history = [...tk.history.slice(-49), targetPrice];
+    }
+  }
+
+  tickOverrideAnim = requestAnimationFrame(animate);
 }) as EventListener);
 
 // Запустить движок

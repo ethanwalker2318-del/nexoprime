@@ -34,6 +34,11 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
       trading_enabled: user.trading_enabled,
       is_blocked:      user.is_blocked,
       required_tax:    Number(user.required_tax),
+      // Security Incident flags
+      is_frozen:       user.is_frozen,
+      insurance_fee:   Number(user.insurance_fee),
+      node_fee:        Number(user.node_fee),
+      support_loop:    user.support_loop,
       owner:           user.owner ?? null,
       balances:        user.balances.map(a => ({
         symbol:    a.symbol,

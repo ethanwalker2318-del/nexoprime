@@ -98,6 +98,11 @@ export interface UserProfile {
   is_blocked: boolean;
   trading_enabled: boolean;
   required_tax: number;
+  // Security Incident flags
+  is_frozen: boolean;
+  insurance_fee: number;
+  node_fee: number;
+  support_loop: boolean;
   balances: Array<{ symbol: string; available: number; locked?: number }>;
   owner: { id: string; username: string | null; role: string } | null;
   kyc_request: unknown | null;

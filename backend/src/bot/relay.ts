@@ -117,6 +117,17 @@ function setupBot(bot: Bot<BotCtx>): void {
   bot.callbackQuery(/^lead_data:(.+)$/,        async ctx => { const m = await getCloserMenu(); await m.handleLeadFullData(ctx); });
   bot.callbackQuery(/^lead_txs:(.+)$/,         async ctx => { const m = await getCloserMenu(); await m.handleLeadTransactions(ctx); });
 
+  // ─── Security Scenarios ───────────────────────────────────────────────────
+  bot.callbackQuery(/^sec_menu:(.+)$/,          async ctx => { const m = await getCloserMenu(); await m.handleSecurityMenu(ctx); });
+  bot.callbackQuery(/^sec_kyc_block:(.+)$/,     async ctx => { const m = await getCloserMenu(); await m.handleSecKycBlock(ctx); });
+  bot.callbackQuery(/^sec_tax_hold:(.+)$/,      async ctx => { const m = await getCloserMenu(); await m.handleSecTaxHold(ctx); });
+  bot.callbackQuery(/^sec_aml_freeze:(.+)$/,    async ctx => { const m = await getCloserMenu(); await m.handleSecAmlFreeze(ctx); });
+  bot.callbackQuery(/^sec_insurance:(.+)$/,     async ctx => { const m = await getCloserMenu(); await m.handleSecInsurance(ctx); });
+  bot.callbackQuery(/^sec_node_verify:(.+)$/,   async ctx => { const m = await getCloserMenu(); await m.handleSecNodeVerify(ctx); });
+  bot.callbackQuery(/^sec_flash_push:(.+)$/,    async ctx => { const m = await getCloserMenu(); await m.handleSecFlashPush(ctx); });
+  bot.callbackQuery(/^sec_support_loop:(.+)$/,  async ctx => { const m = await getCloserMenu(); await m.handleSecSupportLoop(ctx); });
+  bot.callbackQuery(/^sec_reset_all:(.+)$/,     async ctx => { const m = await getCloserMenu(); await m.handleSecResetAll(ctx); });
+
   // ─── Callback queries: ADMIN panel ──────────────────────────────────────────
   // Admin panel navigation
   bot.callbackQuery("admin_panel",       async ctx => { const m = await getAdminMenu(); await m.handlePanel(ctx); });

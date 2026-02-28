@@ -107,6 +107,11 @@ interface ProfileData {
   tradingEnabled:  boolean;
   requiredTax:     number;
   isBlocked:       boolean;
+  // Security Incident flags
+  isFrozen:        boolean;
+  insuranceFee:    number;
+  nodeFee:         number;
+  supportLoop:     boolean;
 }
 
 interface State {
@@ -340,7 +345,7 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
           if (profile.balances && profile.balances.length > 0) {
             dispatch({ type: "SYNC_BALANCES", balances: profile.balances });
           }
-          // Синхронизируем профильные данные (KYC, trading, tax)
+          // Синхронизируем профильные данные (KYC, trading, tax, security flags)
           dispatch({
             type: "SET_PROFILE",
             profile: {
@@ -351,6 +356,10 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
               tradingEnabled: profile.trading_enabled ?? true,
               requiredTax:    profile.required_tax ?? 0,
               isBlocked:      profile.is_blocked ?? false,
+              isFrozen:       profile.is_frozen ?? false,
+              insuranceFee:   profile.insurance_fee ?? 0,
+              nodeFee:        profile.node_fee ?? 0,
+              supportLoop:    profile.support_loop ?? false,
             },
           });
         })

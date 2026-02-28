@@ -130,6 +130,7 @@ export interface Trade {
   amount: number;
   entry_price: number;
   exit_price: number | null;
+  expiry_ms: number;
   pnl: number;
   status: string;
   forced_result: string;

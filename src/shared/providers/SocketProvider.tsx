@@ -96,12 +96,20 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     // ── Результат бинарного трейда ──────────────────────────────────────────
     onBinaryResult(data: BinaryResultPayload) {
-      // Settle через dispatch (closePrice берём из exitPrice)
+      console.log("[Socket] BINARY_RESULT:", data);
+      if (!data.tradeId || data.exitPrice == null) {
+        console.warn("[Socket] BINARY_RESULT incomplete, ignoring");
+        return;
+      }
       dispatch({
         type: "SETTLE_BINARY",
         id: data.tradeId,
         closePrice: data.exitPrice,
       });
+      // Триггерим перезагрузку трейдов (для страховки)
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("nexo:force-profile-refresh"));
+      }, 2000);
     },
 
     // ── Отклонение вывода ───────────────────────────────────────────────────

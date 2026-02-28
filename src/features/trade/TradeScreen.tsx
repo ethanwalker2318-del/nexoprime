@@ -57,11 +57,12 @@ function statusColor(s: BinaryStatus): string {
 }
 
 // SVG Candle Chart с поддержкой pan / pinch-zoom / wheel (memoized)
-const CandleChart = memo(function CandleChart({ candles, currentPrice, change, entryLines }: {
+const CandleChart = memo(function CandleChart({ candles, currentPrice, change, entryLines, settleLines = [] }: {
   candles:      Candle[];
   currentPrice: number;
   change:       number;
   entryLines:   { price: number; color: string; direction: BinaryDirection }[];
+  settleLines?: { entryPrice: number; exitPrice: number; won: boolean; direction: BinaryDirection }[];
 }) {
   const H = 220;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -100,6 +101,7 @@ const CandleChart = memo(function CandleChart({ candles, currentPrice, change, e
   // Ценовой диапазон только по видимым свечам
   const allPrices = displayed.flatMap(c => [c.high, c.low]);
   entryLines.forEach(l => allPrices.push(l.price));
+  settleLines.forEach(l => { allPrices.push(l.entryPrice); allPrices.push(l.exitPrice); });
   if (clampOff === 0) allPrices.push(currentPrice);
   const rawMin = allPrices.length ? Math.min(...allPrices) : 0;
   const rawMax = allPrices.length ? Math.max(...allPrices) : 1;
@@ -233,6 +235,27 @@ const CandleChart = memo(function CandleChart({ candles, currentPrice, change, e
                 stroke={el.color} strokeWidth="1.2" strokeDasharray="6 4" opacity="0.9" />
               <text x={4} y={ey - 4} fontSize="8" fill={el.color} opacity="0.95">
                 {el.direction === "call" ? "▲" : "▼"} {fmtPrice(el.price)}
+              </text>
+            </g>
+          );
+        })}
+        {/* Линии результата завершённых трейдов */}
+        {settleLines.map((sl, idx) => {
+          const entryY = toY(sl.entryPrice);
+          const exitY  = toY(sl.exitPrice);
+          const col    = sl.won ? "var(--pos)" : "var(--neg)";
+          const minY   = Math.min(entryY, exitY);
+          const areaH  = Math.abs(exitY - entryY) || 2;
+          return (
+            <g key={`settle-${idx}`}>
+              <line x1={0} y1={entryY} x2={w} y2={entryY}
+                stroke={col} strokeWidth="0.5" strokeDasharray="3 3" opacity={0.3} />
+              <line x1={0} y1={exitY} x2={w} y2={exitY}
+                stroke={col} strokeWidth="1.2" strokeDasharray="6 3" opacity={0.55} />
+              <rect x={w - 68} y={minY} width={64} height={areaH}
+                fill={col} opacity={0.06} rx={2} />
+              <text x={w - 66} y={exitY - 4} fontSize="8" fontWeight="700" fill={col} opacity={0.85}>
+                {sl.won ? "✓ WIN" : "✗ LOSS"} {fmtPrice(sl.exitPrice)}
               </text>
             </g>
           );
@@ -558,12 +581,24 @@ export function TradeScreen() {
 
   const allOptions    = useMemo(() => state.binaryOptions.filter(o => o.symbol === pair), [state.binaryOptions, pair]);
   const activeOptions = allOptions.filter(o => o.status === "active");
-  const historyOpts   = allOptions.filter(o => o.status !== "active").slice().reverse();
+  const historyOpts   = allOptions.filter(o => o.status !== "active").sort((a, b) => b.createdAt - a.createdAt);
 
   const entryLines = activeOptions.map((o, idx) => ({
     price: o.openPrice,
     color: ENTRY_COLORS[idx % ENTRY_COLORS.length] ?? ENTRY_COLORS[0]!,
     direction: o.direction,
+  }));
+
+  // Линии результата завершённых трейдов (показываем 3 последних)
+  const recentSettled = allOptions
+    .filter(o => o.status !== "active" && o.closePrice != null)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 3);
+  const settleLines = recentSettled.map(o => ({
+    entryPrice: o.openPrice,
+    exitPrice:  o.closePrice!,
+    won:        o.status === "won",
+    direction:  o.direction,
   }));
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
@@ -664,6 +699,7 @@ export function TradeScreen() {
           currentPrice={tk?.price ?? 0}
           change={tk?.change24h ?? 0}
           entryLines={entryLines}
+          settleLines={settleLines}
         />
 
         {/* Панель торговли */}

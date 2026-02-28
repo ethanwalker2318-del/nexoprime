@@ -3,7 +3,8 @@ import React, {
 } from "react";
 import { subscribeTickers, getTicker } from "./mockEngine";
 import type { Ticker } from "./mockEngine";
-import { getProfile } from "../api/client";
+import { getProfile, getActiveTrades, getTradeHistory } from "../api/client";
+import type { Trade as ApiTrade } from "../api/client";
 
 // ─── Типы ────────────────────────────────────────────────────────────────────
 
@@ -130,6 +131,24 @@ function makeAsset(symbol: string, available = 0, locked = 0): Asset {
   return { symbol, available, locked, avgBuyPrice: 0, realizedPnl: 0, totalBought: 0 };
 }
 
+function serverTradeToOption(t: ApiTrade): BinaryOption {
+  const raw = t.status.toLowerCase();
+  const status: BinaryStatus = raw === "won" ? "won" : raw === "lost" ? "lost" : raw === "draw" ? "draw" : "active";
+  return {
+    id:         t.id,
+    symbol:     t.symbol,
+    direction:  t.direction.toLowerCase() as BinaryDirection,
+    stake:      t.amount,
+    openPrice:  t.entry_price,
+    closePrice: t.exit_price ?? undefined,
+    expiryMs:   t.expiry_ms ?? 60_000,
+    expiresAt:  new Date(t.expires_at).getTime(),
+    status,
+    pnl:        t.pnl ?? 0,
+    createdAt:  new Date(t.created_at).getTime(),
+  };
+}
+
 // ─── Персистентность пользователя ────────────────────────────────────────────
 const USER_KEY = "nexo_user_v1";
 
@@ -184,7 +203,8 @@ type Action =
   | { type: "PLACE_BINARY";      option: BinaryOption }
   | { type: "MAP_BINARY_ID";     clientId: string; serverId: string }
   | { type: "REMOVE_BINARY";     clientId: string }
-  | { type: "SETTLE_BINARY";     id: string; closePrice: number };
+  | { type: "SETTLE_BINARY";     id: string; closePrice: number }
+  | { type: "LOAD_BINARY_OPTIONS"; options: BinaryOption[] };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -304,6 +324,14 @@ function reducer(state: State, action: Action): State {
     case "UPDATE_WITHDRAWAL":
       return { ...state, withdrawals: state.withdrawals.map(w => w.id === action.id ? { ...w, ...action.patch } : w) };
 
+    case "LOAD_BINARY_OPTIONS": {
+      const serverIds = new Set(action.options.map(o => o.id));
+      const localOnly = state.binaryOptions.filter(
+        o => o.id.startsWith("bin_") && !serverIds.has(o.id)
+      );
+      return { ...state, binaryOptions: [...localOnly, ...action.options] };
+    }
+
     default:
       return state;
   }
@@ -372,15 +400,35 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
 
     fetchBalances();
 
+    // ── Загрузка истории трейдов ──────────────────────────────────────────
+    const fetchTrades = () => {
+      Promise.all([getActiveTrades(), getTradeHistory(50)])
+        .then(([active, history]) => {
+          const all = [...active, ...history].map(serverTradeToOption);
+          const seen = new Set<string>();
+          const unique = all.filter(o => {
+            if (seen.has(o.id)) return false;
+            seen.add(o.id);
+            return true;
+          });
+          dispatch({ type: "LOAD_BINARY_OPTIONS", options: unique });
+        })
+        .catch(err => console.warn("[NEXO] trades fetch failed:", err.message ?? err));
+    };
+    fetchTrades();
+
     // Периодическая подгрузка балансов каждые 15 сек (fallback если WS отвалился)
     const iv = setInterval(fetchBalances, 15_000);
+    // Подгрузка трейдов каждые 30 сек (fallback если BINARY_RESULT потерялся)
+    const tradeIv = setInterval(fetchTrades, 30_000);
 
     // Слушаем принудительное обновление профиля (KYC, trading toggle)
-    function onForceRefresh() { fetchBalances(); }
+    function onForceRefresh() { fetchBalances(); fetchTrades(); }
     window.addEventListener("nexo:force-profile-refresh", onForceRefresh);
 
     return () => {
       clearInterval(iv);
+      clearInterval(tradeIv);
       window.removeEventListener("nexo:force-profile-refresh", onForceRefresh);
     };
   }, [state.user]);

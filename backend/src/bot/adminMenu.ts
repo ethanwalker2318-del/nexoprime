@@ -213,7 +213,7 @@ export async function processReassign(ctx: BotCtx, text: string): Promise<boolea
   return true;
 }
 
-// ─── /add_closer  — создать нового клоузера ──────────────────────────────────
+// ─── /add_closer  — создать ссылку-приглашение для нового клоузера ─────────────
 
 export async function handleAddCloser(ctx: BotCtx): Promise<void> {
   const tgId = BigInt(ctx.from!.id);
@@ -223,46 +223,39 @@ export async function handleAddCloser(ctx: BotCtx): Promise<void> {
     return;
   }
 
-  ctx.session.pendingAction = { type: "add_closer", userId: "" };
-  await ctx.reply("🧑‍💼 Введите TG ID нового клоузера:");
-}
+  // Генерируем одноразовый токен для приглашения
+  const joinToken = randomBytes(8).toString("hex");
 
-export async function processAddCloser(ctx: BotCtx, text: string): Promise<boolean> {
-  const action = ctx.session.pendingAction;
-  if (!action || action.type !== "add_closer") return false;
-  ctx.session.pendingAction = undefined;
-
-  const tgIdNum = Number(text.trim());
-  if (isNaN(tgIdNum)) {
-    await ctx.reply("❌ Неверный TG ID.");
-    return true;
-  }
-
-  const exists = await prisma.admin.findFirst({ where: { tg_id: BigInt(tgIdNum) } });
-  if (exists) {
-    await ctx.reply("❌ Этот TG ID уже является админом/клоузером.");
-    return true;
-  }
-
-  const inviteCode = randomBytes(6).toString("hex");
-  const closer = await prisma.admin.create({
+  // Создаём placeholder с уникальным отрицательным tg_id (для сохранения @unique)
+  const pendingTgId = BigInt(-Date.now()) - BigInt(Math.floor(Math.random() * 1_000_000));
+  await prisma.admin.create({
     data: {
-      tg_id: BigInt(tgIdNum),
-      role: "CLOSER",
-      invite_code: inviteCode,
+      tg_id:       pendingTgId, // placeholder — заполнится когда человек нажмёт Start
+      role:        "CLOSER",
+      invite_code: joinToken,
+      is_active:   false,       // пока не активирован
+      username:    "__pending__",
     },
   });
 
+  const link = `https://t.me/${getBotUsername()}?start=joincl_${joinToken}`;
+
   await ctx.reply(
     [
-      `✅ <b>Клоузер создан!</b>`,
-      `TG ID: <code>${tgIdNum}</code>`,
-      `Invite code: <code>${inviteCode}</code>`,
-      `Deep Link: <code>https://t.me/${getBotUsername()}?start=cl_${inviteCode}</code>`,
+      `🔗 <b>Ссылка-приглашение для нового клоузера:</b>`,
+      ``,
+      `<code>${link}</code>`,
+      ``,
+      `Отправь эту ссылку человеку — когда он нажмёт <b>Start</b>, он автоматически станет клоузером.`,
+      `Ссылка одноразовая.`,
     ].join("\n"),
     { parse_mode: "HTML" }
   );
-  return true;
+}
+
+// processAddCloser больше не нужен (совместимость — возвращает false)
+export async function processAddCloser(_ctx: BotCtx, _text: string): Promise<boolean> {
+  return false;
 }
 
 // ─── /block_user — заблокировать лида по TG ID ───────────────────────────────

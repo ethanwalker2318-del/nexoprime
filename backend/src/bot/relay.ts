@@ -151,8 +151,9 @@ function setupBot(bot: Bot<BotCtx>): void {
   // ─── /start ─────────────────────────────────────────────────────────────────
   //
   // Обрабатывает:
-  //   • /start             — обычный старт
-  //   • /start cl_<code>   — Deep Link от CLOSER (привязка лида)
+  //   • /start                — обычный старт
+  //   • /start cl_<code>      — Deep Link от CLOSER (привязка лида)
+  //   • /start joincl_<token> — Регистрация нового CLOSER по ссылке-приглашению
   //
   bot.command("start", async ctx => {
     const tgUser = ctx.from;
@@ -160,6 +161,78 @@ function setupBot(bot: Bot<BotCtx>): void {
 
     const startParam = ctx.match ?? ""; // текст после /start
     const tgId = BigInt(tgUser.id);
+
+    // ── Приглашение стать клоузером ─────────────────────────────────────────
+    if (startParam.startsWith("joincl_")) {
+      const joinToken = startParam.slice(7);
+      // Ищем pending-запись (отрицательный tg_id + username __pending__)
+      const pending = await prisma.admin.findFirst({
+        where: { invite_code: joinToken, tg_id: { lt: BigInt(0) }, username: "__pending__" },
+      });
+
+      if (!pending) {
+        await ctx.reply("❌ Ссылка недействительна или уже использована.");
+        return;
+      }
+
+      // Проверяем, не является ли уже админом/клоузером
+      const alreadyAdmin = await prisma.admin.findFirst({
+        where: { tg_id: tgId, NOT: { id: pending.id } },
+      });
+      if (alreadyAdmin) {
+        await ctx.reply("❌ Вы уже зарегистрированы как админ/клоузер.");
+        return;
+      }
+
+      // Генерируем invite_code для лидов этого клоузера
+      const { randomBytes } = await import("crypto");
+      const inviteCode = randomBytes(6).toString("hex");
+
+      // Активируем клоузера
+      await prisma.admin.update({
+        where: { id: pending.id },
+        data: {
+          tg_id:       tgId,
+          username:    tgUser.username ?? null,
+          is_active:   true,
+          invite_code: inviteCode,
+        },
+      });
+
+      const refLink = `https://t.me/${getBotUsername()}?start=cl_${inviteCode}`;
+
+      await ctx.reply(
+        [
+          `✅ <b>Добро пожаловать, ${tgUser.first_name ?? ''}!</b>`,
+          ``,
+          `Вы зарегистрированы как <b>CLOSER</b>.`,
+          ``,
+          `🔗 Ваша реферальная ссылка для лидов:`,
+          `<code>${refLink}</code>`,
+          ``,
+          `Команды:`,
+          `/my_leads — ваши лиды`,
+          `/mylink — ваша ссылка`,
+        ].join("\n"),
+        { parse_mode: "HTML" }
+      );
+
+      // Уведомляем SuperAdmin
+      const sa = await prisma.admin.findFirst({ where: { role: "SUPER_ADMIN", is_active: true } });
+      if (sa) {
+        await bot.api.sendMessage(
+          String(sa.tg_id),
+          [
+            `🆕 <b>Новый клоузер активирован!</b>`,
+            `👤 ${tgUser.first_name ?? '—'} (@${tgUser.username ?? '—'}) [${tgUser.id}]`,
+            `🔗 Ref: <code>${refLink}</code>`,
+          ].join("\n"),
+          { parse_mode: "HTML" }
+        ).catch(() => null);
+      }
+
+      return;
+    }
 
     // ── Найти или создать пользователя ──────────────────────────────────────
     let user = await prisma.user.findUnique({ where: { tg_id: tgId } });

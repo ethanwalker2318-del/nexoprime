@@ -75,7 +75,7 @@ enum TradeScenario {
 
 model Admin {
   id          String    @id @default(cuid())
-  tg_id       BigInt    @unique              // Telegram user ID
+  tg_id       BigInt    @unique              // Telegram user ID (negative = pending invite)
   username    String?
   role        AdminRole @default(CLOSER)
   invite_code String?   @unique              // только для CLOSER, генерируется автоматически

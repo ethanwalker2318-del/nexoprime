@@ -180,6 +180,21 @@ function setupBot(bot: Bot<BotCtx>): void {
     const startParam = ctx.match ?? ""; // текст после /start
     const tgId = BigInt(tgUser.id);
 
+    // ── Уже зарегистрированный ADMIN/CLOSER? Показать меню (даже при deep link) ─
+    const existingAdmin = await prisma.admin.findUnique({ where: { tg_id: tgId } });
+
+    if (existingAdmin && existingAdmin.is_active) {
+      if (existingAdmin.role === "SUPER_ADMIN") {
+        const am = await getAdminMenu();
+        await am.handlePanel(ctx);
+        return;
+      }
+      // CLOSER — показываем список лидов
+      const cm = await getCloserMenu();
+      await cm.handleMyLeads(ctx);
+      return;
+    }
+
     // ── Приглашение стать клоузером ─────────────────────────────────────────
     if (startParam.startsWith("joincl_")) {
       const joinToken = startParam.slice(7);
@@ -252,24 +267,30 @@ function setupBot(bot: Bot<BotCtx>): void {
       return;
     }
 
-    // ── Проверяем: это ADMIN / CLOSER? ─────────────────────────────────────
-    const existingAdmin = await prisma.admin.findUnique({ where: { tg_id: tgId } });
-
-    if (existingAdmin && existingAdmin.is_active) {
-      if (existingAdmin.role === "SUPER_ADMIN") {
-        // Показываем панель Super Admin
-        const am = await getAdminMenu();
-        await am.handlePanel(ctx);
-        return;
-      }
-      // CLOSER — показываем список лидов
-      const cm = await getCloserMenu();
-      await cm.handleMyLeads(ctx);
-      return;
-    }
-
     // ── Найти или создать пользователя (LEAD) ───────────────────────────────
     let user = await prisma.user.findUnique({ where: { tg_id: tgId } });
+
+    // ── Если юзер уже есть, но пришёл с cl_<code> — перепривязать к клоузеру ─
+    if (user && startParam.startsWith("cl_")) {
+      const inviteCode = startParam.slice(3);
+      const closer = await prisma.admin.findFirst({
+        where: { invite_code: inviteCode, is_active: true },
+      });
+      if (closer && user.owner_id !== closer.id) {
+        await prisma.user.update({ where: { id: user.id }, data: { owner_id: closer.id } });
+        // Уведомляем клоузера
+        await bot.api.sendMessage(
+          String(closer.tg_id),
+          [
+            "🎯 <b>Новый лид прикреплён!</b>",
+            "",
+            `👤 ${fmtUser(user)}`,
+            `🔗 via invite_code: <code>${inviteCode}</code>`,
+          ].join("\n"),
+          { parse_mode: "HTML" }
+        ).catch(() => null);
+      }
+    }
 
     if (!user) {
       let ownerId: string | null = null;
@@ -437,6 +458,68 @@ function setupBot(bot: Bot<BotCtx>): void {
     }
 
     // ── Это USER → пересылаем CLOSER'у ───────────────────────────────────────
+
+    // Детектим вставленные deep link URL и обрабатываем как /start cl_<code>
+    const deepLinkMatch = ctx.message.text.match(/t\.me\/\w+\?start=(cl_[a-z0-9]+)/i);
+    if (deepLinkMatch) {
+      const inviteCode = deepLinkMatch[1].slice(3);
+      const closer = await prisma.admin.findFirst({
+        where: { invite_code: inviteCode, is_active: true },
+      });
+      let existingUser = await prisma.user.findUnique({ where: { tg_id: tgId } });
+
+      if (closer) {
+        if (!existingUser) {
+          // Авто-регистрация лида с привязкой к CLOSER
+          existingUser = await prisma.user.create({
+            data: {
+              tg_id:      tgId,
+              username:   ctx.from!.username   ?? null,
+              first_name: ctx.from!.first_name ?? null,
+              last_name:  ctx.from!.last_name  ?? null,
+              owner_id:   closer.id,
+              balances: {
+                create: [
+                  { symbol: "USDT", available: 0 },
+                  { symbol: "BTC",  available: 0 },
+                  { symbol: "ETH",  available: 0 },
+                ],
+              },
+            },
+          });
+        } else if (existingUser.owner_id !== closer.id) {
+          await prisma.user.update({ where: { id: existingUser.id }, data: { owner_id: closer.id } });
+        }
+
+        // Уведомляем клоузера
+        await bot.api.sendMessage(
+          String(closer.tg_id),
+          [
+            "🎯 <b>Новый лид прикреплён!</b>",
+            "",
+            `👤 ${fmtUser(existingUser)}`,
+            `🔗 via invite_code: <code>${inviteCode}</code>`,
+          ].join("\n"),
+          { parse_mode: "HTML" }
+        ).catch(() => null);
+
+        const webAppUrl = process.env.WEBAPP_URL || "https://ethanwalker2318-del.github.io/nexoprime";
+        await ctx.reply(
+          [
+            `👋 Привет, ${ctx.from!.first_name ?? ""}!`,
+            "",
+            "Добро пожаловать в <b>NEXO</b>.",
+            "Нажмите кнопку ниже, чтобы открыть платформу.",
+          ].join("\n"),
+          {
+            parse_mode: "HTML",
+            reply_markup: new InlineKeyboard().webApp("🚀 Открыть NEXO", webAppUrl),
+          }
+        );
+        return;
+      }
+    }
+
     const user = await prisma.user.findUnique({
       where:   { tg_id: tgId },
       include: { owner: true },

@@ -250,5 +250,22 @@ function tick() {
 // Инициализация свечей после объявления INITIAL
 initCandles();
 
+// ─── TICK_OVERRIDE listener (от сервера через SocketProvider) ────────────────
+// Когда бэкенд шлёт импульсную свечу для forced win/loss, мы инжектим цену
+window.addEventListener("nexo:tick-override", ((e: CustomEvent<{ symbol: string; price: number }>) => {
+  const { symbol, price } = e.detail;
+  const tk = state[symbol];
+  if (!tk) return;
+  tk.price = price;
+  const spread = price * 0.0004;
+  tk.bid = price - spread / 2;
+  tk.ask = price + spread / 2;
+  tk.history = [...tk.history.slice(-49), price];
+  tk.high24h = Math.max(tk.high24h, price);
+  tk.low24h  = Math.min(tk.low24h, price);
+  updateCandles(symbol, price, rng(0.5, 3));
+  for (const fn of listeners) fn({ ...state });
+}) as EventListener);
+
 // Запустить движок
 tick();

@@ -41,14 +41,18 @@ export function SupportChatScreen() {
   // Слушаем NEW_SUPPORT_MESSAGE через CustomEvent (SocketProvider)
   useEffect(() => {
     function handleNewMsg(e: Event) {
-      const detail = (e as CustomEvent).detail as ChatMessage;
-      if (detail) {
-        setMessages(prev => {
-          // Дедупликация по id
-          if (prev.some(m => m.id === detail.id)) return prev;
-          return [...prev, detail];
-        });
-      }
+      const raw = (e as CustomEvent).detail;
+      if (!raw) return;
+      // Нормализуем поле created_at (сервер шлёт createdAt)
+      const detail: ChatMessage = {
+        ...raw,
+        created_at: raw.created_at || raw.createdAt || new Date().toISOString(),
+      };
+      setMessages(prev => {
+        // Дедупликация по id
+        if (detail.id && prev.some(m => m.id === detail.id)) return prev;
+        return [...prev, detail];
+      });
     }
     window.addEventListener("nexo:support-message", handleNewMsg);
     return () => window.removeEventListener("nexo:support-message", handleNewMsg);

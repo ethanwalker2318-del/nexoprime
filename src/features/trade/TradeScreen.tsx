@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useExchange } from "../../shared/store/exchangeStore";
+import { useSocketCtx } from "../../shared/providers/SocketProvider";
 import { useRouter } from "../../app/providers/RouterProvider";
 import { getCandles } from "../../shared/store/mockEngine";
 import type { Candle } from "../../shared/store/mockEngine";
@@ -467,7 +468,8 @@ function HistoryStats({ options }: { options: BinaryOption[] }) {
 
 // Основной экран
 export function TradeScreen() {
-  const { state, placeBinary } = useExchange();
+  const { state, dispatch } = useExchange();
+  const { placeBinary: serverPlaceBinary } = useSocketCtx();
   const { tradePair } = useRouter();
 
   const [pair,       setPair]       = useState(() => tradePair ?? "BTC/USDT");
@@ -499,14 +501,40 @@ export function TradeScreen() {
   function handlePlace() {
     const s = parseFloat(stake);
     if (!s || s <= 0) { showToast("Укажите ставку", false); return; }
+    if (!tk) { showToast("Пара не найдена", false); return; }
+    const usdtBal = usdt?.available ?? 0;
+    if (usdtBal < s) { showToast(`Недостаточно USDT (${usdtBal.toFixed(2)})`, false); return; }
     const exp = EXPIRY_OPTIONS[expiryIdx]!;
-    const r = placeBinary(pair, direction, s, exp.ms);
-    if (r.ok) {
-      showToast(`${direction === "call" ? "▲ CALL" : "▼ PUT"} размещён на ${exp.label}`, true);
-      setBottomTab("active");
-    } else {
-      showToast(r.error ?? "Ошибка", false);
-    }
+
+    // Отправляем трейд на сервер (финальный settlement придёт через BINARY_RESULT)
+    serverPlaceBinary({
+      symbol: pair,
+      direction: direction === "call" ? "CALL" : "PUT",
+      amount: s,
+      entryPrice: tk.price,
+      expiryMs: exp.ms,
+    });
+
+    // Оптимистичное обновление UI: показываем опцион + списываем USDT локально
+    dispatch({ type: "UPDATE_ASSET", symbol: "USDT", patch: { available: usdtBal - s } });
+    dispatch({
+      type: "PLACE_BINARY",
+      option: {
+        id: "bin_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        symbol: pair,
+        direction: direction === "call" ? "call" : "put",
+        stake: s,
+        openPrice: tk.price,
+        expiryMs: exp.ms,
+        expiresAt: Date.now() + exp.ms,
+        status: "active",
+        pnl: 0,
+        createdAt: Date.now(),
+      },
+    });
+
+    showToast(`${direction === "call" ? "▲ CALL" : "▼ PUT"} размещён на ${exp.label}`, true);
+    setBottomTab("active");
   }
 
   const stakeNum = parseFloat(stake) || 0;

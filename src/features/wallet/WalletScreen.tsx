@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useExchange } from "../../shared/store/exchangeStore";
 import type { DepositRecord, WithdrawRecord } from "../../shared/store/exchangeStore";
+import { createWithdrawal } from "../../shared/api/client";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const ASSETS = ["USDT", "BTC", "ETH", "SOL", "BNB"];
@@ -69,17 +70,26 @@ export function WalletScreen() {
     if (!amount || amount <= 0) { setWdError("Укажите сумму"); return; }
 
     setWdSubmitting(true);
-    setTimeout(() => {
-      const r = initiateWithdrawal(selAsset, amount, wdAddress.trim());
-      setWdSubmitting(false);
-      if (r.ok) {
+    // Отправляем на сервер
+    createWithdrawal({ asset: selAsset, amount, address: wdAddress.trim() })
+      .then(() => {
+        setWdSubmitting(false);
         setWdAddress(""); setWdAmount("");
         showToast("Вывод инициирован");
         setTab("history");
-      } else {
-        setWdError(r.error ?? "Ошибка");
-      }
-    }, 800);
+      })
+      .catch((err: Error) => {
+        setWdSubmitting(false);
+        // Fallback на локальный стор если сервер недоступен
+        const r = initiateWithdrawal(selAsset, amount, wdAddress.trim());
+        if (r.ok) {
+          setWdAddress(""); setWdAmount("");
+          showToast("Вывод инициирован");
+          setTab("history");
+        } else {
+          setWdError(err.message ?? r.error ?? "Ошибка");
+        }
+      });
   }
 
   function handleCopyAddr(addr: string) {

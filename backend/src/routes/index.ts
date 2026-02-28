@@ -71,14 +71,14 @@ router.get("/trade/history",    tgAuthMiddleware, tradeHistory);
 
 // ─── FINANCE ─────────────────────────────────────────────────────────────────
 router.post("/finance/deposit",          tgAuthMiddleware, requestDeposit);
-router.post("/finance/deposit/confirm",  tgAuthMiddleware, confirmDepositCtrl);
+router.post("/finance/deposit/confirm",  requireAdmin, confirmDepositCtrl);
 router.post("/finance/withdraw",         tgAuthMiddleware, antiTamperMiddleware, requestWithdrawal);
 router.post("/finance/withdraw/cancel",  tgAuthMiddleware, cancelWithdrawalCtrl);
 
 // ─── SUPPORT / CHAT ─────────────────────────────────────────────────────────
 router.get("/user/messages",       tgAuthMiddleware, getMessages);
 router.post("/user/messages",      tgAuthMiddleware, chatRateLimitMiddleware, sendMessage);
-router.post("/user/messages/reply", tgAuthMiddleware, replyMessage);
+router.post("/user/messages/reply", requireAdmin, replyMessage);
 
 // ─── EVENT LOGGER ────────────────────────────────────────────────────────────
 router.post("/user/event", tgAuthMiddleware, logUserEvent);

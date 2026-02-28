@@ -29,6 +29,12 @@ export interface BinaryResultPayload {
   forced: boolean;
 }
 
+export interface BinaryPlacedPayload {
+  ok: boolean;
+  tradeId?: string;
+  error?: string;
+}
+
 export interface WithdrawalRejectedPayload {
   txId: string;
   reason: string;
@@ -62,6 +68,7 @@ export interface UpdateKycPayload {
 export interface SocketCallbacks {
   onBalanceUpdate?:       (data: BalanceUpdatePayload) => void;
   onBinaryResult?:        (data: BinaryResultPayload) => void;
+  onBinaryPlaced?:        (data: BinaryPlacedPayload) => void;
   onWithdrawalRejected?:  (data: WithdrawalRejectedPayload) => void;
   onSupportMessage?:      (data: SupportMessagePayload) => void;
   onForceLogout?:         () => void;
@@ -118,6 +125,10 @@ export function useSocket(callbacks: SocketCallbacks = {}) {
 
     socket.on("BINARY_RESULT", (data: BinaryResultPayload) => {
       cbRef.current.onBinaryResult?.(data);
+    });
+
+    socket.on("BINARY_PLACED", (data: BinaryPlacedPayload) => {
+      cbRef.current.onBinaryPlaced?.(data);
     });
 
     socket.on("WITHDRAWAL_REJECTED", (data: WithdrawalRejectedPayload) => {

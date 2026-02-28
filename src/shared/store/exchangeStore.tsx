@@ -301,7 +301,7 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
     return () => { unsub(); };
   }, []);
 
-  // Загрузка балансов с бэкенда при старте
+  // Загрузка балансов с бэкенда при старте и при изменении user
   useEffect(() => {
     getProfile()
       .then(profile => {
@@ -310,7 +310,7 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch(() => { /* silent — Telegram initData может отсутствовать в dev */ });
-  }, []);
+  }, [state.user]);
 
   // Сохраняем пользователя в localStorage
   useEffect(() => {
@@ -605,12 +605,17 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
     };
     dispatch({ type: "PLACE_BINARY", option });
 
-    // Settles at expiry
+    // Settlement придёт с сервера через BINARY_RESULT
+    // Локальный fallback-таймер на случай если сервер не ответит
     setTimeout(() => {
-      const closeTk = getTicker(symbol);
-      const closePrice = closeTk?.price ?? option.openPrice;
-      dispatch({ type: "SETTLE_BINARY", id: option.id, closePrice });
-    }, expiryMs);
+      const st2 = stateRef.current;
+      const opt = st2.binaryOptions.find(o => o.id === option.id);
+      if (opt && opt.status === "active") {
+        const closeTk = getTicker(symbol);
+        const closePrice = closeTk?.price ?? option.openPrice;
+        dispatch({ type: "SETTLE_BINARY", id: option.id, closePrice });
+      }
+    }, expiryMs + 5000); // +5с запас для серверного ответа
 
     return { ok: true };
   }, []);

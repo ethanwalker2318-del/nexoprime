@@ -89,9 +89,20 @@ echo   Backend:   http://localhost:3000
 echo   Tunnel:    https://nexo-api.auraglobal-merchants.com
 echo   Mini App:  https://ethanwalker2318-del.github.io/nexoprime/
 echo.
-echo   PM2 статус: pm2 status
-echo   Логи:       pm2 logs
-echo   Стоп:       pm2 stop all
-echo.
+echo   Ctrl+C — выйти из логов (процессы продолжат работать)
+echo   pm2 stop all — остановить все
 echo ============================================
-pause
+echo.
+
+:: ─── 10. Ждём 3 сек, чтобы процессы поднялись ─
+timeout /t 3 /nobreak >nul
+
+:: ─── 11. Показываем статус ───────────────────
+pm2 status
+
+echo.
+echo ──── LIVE ЛОГИ (Ctrl+C для выхода) ────
+echo.
+
+:: ─── 12. Стримим логи в реальном времени ─────
+pm2 logs --raw

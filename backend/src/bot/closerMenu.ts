@@ -166,12 +166,17 @@ export async function handleToggleTrading(ctx: BotCtx): Promise<void> {
   const lead = await prisma.user.findUnique({ where: { id: userId } });
   if (!lead) return;
 
+  const newEnabled = !lead.trading_enabled;
   await prisma.user.update({
     where: { id: userId },
-    data: { trading_enabled: !lead.trading_enabled },
+    data: { trading_enabled: newEnabled },
   });
 
-  await ctx.answerCallbackQuery({ text: `Trading ${!lead.trading_enabled ? "ON" : "OFF"}` });
+  // Мгновенно уведомляем фронтенд через Socket
+  const { emitToUser } = await import("../socket");
+  emitToUser(userId, "TRADING_TOGGLED", { enabled: newEnabled });
+
+  await ctx.answerCallbackQuery({ text: `Trading ${newEnabled ? "ON" : "OFF"}` });
   // Обновляем панель
   await handleManageLead(ctx);
 }
@@ -248,6 +253,10 @@ export async function handleKycSet(ctx: BotCtx): Promise<void> {
     where: { id: userId },
     data: { kyc_status: status },
   });
+
+  // Мгновенно уведомляем фронтенд через Socket
+  const { adminUpdateKyc } = await import("../socket");
+  adminUpdateKyc(userId, status);
 
   // Если отклонено — уведомляем лида через бота
   if (status === "NONE") {

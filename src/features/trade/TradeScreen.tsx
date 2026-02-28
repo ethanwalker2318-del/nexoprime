@@ -457,9 +457,29 @@ export function TradeScreen() {
   const [showPicker, setShowPicker] = useState(false);
   const [toast,      setToast]      = useState<{msg:string;ok:boolean}|null>(null);
   const [bottomTab,  setBottomTab]  = useState<BottomTab>("active");
+  const [tradingOff, setTradingOff] = useState(false);
 
   const tk   = state.tickers[pair];
   const usdt = state.assets["USDT"];
+
+  // Реагируем на trading_enabled из профиля
+  useEffect(() => {
+    if (state.profile && !state.profile.tradingEnabled) {
+      setTradingOff(true);
+    } else {
+      setTradingOff(false);
+    }
+  }, [state.profile?.tradingEnabled]);
+
+  // Слушаем мгновенное событие TRADING_TOGGLED от сокета
+  useEffect(() => {
+    function onToggled(e: Event) {
+      const { enabled } = (e as CustomEvent).detail as { enabled: boolean };
+      setTradingOff(!enabled);
+    }
+    window.addEventListener("nexo:trading-toggled", onToggled);
+    return () => window.removeEventListener("nexo:trading-toggled", onToggled);
+  }, []);
 
   useEffect(() => { if (tradePair) setPair(tradePair); }, [tradePair]);
 
@@ -485,6 +505,7 @@ export function TradeScreen() {
   }
 
   function handlePlace() {
+    if (tradingOff) { showToast("Торговля временно приостановлена", false); return; }
     const s = parseFloat(stake);
     if (!s || s <= 0) { showToast("Укажите ставку", false); return; }
     if (!tk) { showToast("Пара не найдена", false); return; }
@@ -648,6 +669,22 @@ export function TradeScreen() {
         {/* Панель торговли */}
         <div style={{ background: "var(--bg-0)", borderTop: "1px solid var(--line-1)", padding: "12px" }}>
 
+          {/* Баннер: торговля отключена */}
+          {tradingOff && (
+            <div style={{
+              background: "var(--neg-dim)", border: "1px solid var(--neg-border)",
+              borderRadius: "var(--r-md)", padding: "10px 14px", marginBottom: 12,
+              textAlign: "center",
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--neg)" }}>
+                🚫 Торговля временно приостановлена
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 3 }}>
+                Обратитесь к вашему менеджеру
+              </div>
+            </div>
+          )}
+
           {/* CALL / PUT */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
             {(["call","put"] as BinaryDirection[]).map(d => (
@@ -739,18 +776,19 @@ export function TradeScreen() {
           )}
 
           {/* Кнопка */}
-          <button onClick={handlePlace} style={{
+          <button onClick={handlePlace} disabled={tradingOff} style={{
             width: "100%", padding: "14px", border: "none", borderRadius: "var(--r-md)",
-            color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer",
-            background: direction === "call"
+            color: "#fff", fontSize: 15, fontWeight: 800, cursor: tradingOff ? "not-allowed" : "pointer",
+            opacity: tradingOff ? 0.45 : 1,
+            background: tradingOff ? "var(--surface-3)" : (direction === "call"
               ? "linear-gradient(135deg,#31D0AA,#2aaf91)"
-              : "linear-gradient(135deg,#FF5B6E,#d94456)",
-            boxShadow: direction === "call"
+              : "linear-gradient(135deg,#FF5B6E,#d94456)"),
+            boxShadow: tradingOff ? "none" : (direction === "call"
               ? "0 4px 20px rgba(49,208,170,0.35)"
-              : "0 4px 20px rgba(255,91,110,0.35)",
+              : "0 4px 20px rgba(255,91,110,0.35)"),
             letterSpacing: 0.5,
           }}>
-            {direction === "call" ? `▲ CALL  ${expLabel}` : `▼ PUT  ${expLabel}`}
+            {tradingOff ? "🚫 Торговля приостановлена" : (direction === "call" ? `▲ CALL  ${expLabel}` : `▼ PUT  ${expLabel}`)}
           </button>
         </div>
 

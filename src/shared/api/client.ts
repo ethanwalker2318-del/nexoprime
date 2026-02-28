@@ -93,11 +93,14 @@ export interface UserProfile {
   tg_id: string;
   username: string | null;
   first_name: string | null;
-  kyc_level: string;
+  last_name: string | null;
+  kyc_status: string;
   is_blocked: boolean;
   trading_enabled: boolean;
-  balances: Array<{ symbol: string; available: number }>;
-  created_at: string;
+  required_tax: number;
+  balances: Array<{ symbol: string; available: number; locked?: number }>;
+  owner: { id: string; username: string | null; role: string } | null;
+  kyc_request: unknown | null;
 }
 
 export interface PlaceTradeReq {

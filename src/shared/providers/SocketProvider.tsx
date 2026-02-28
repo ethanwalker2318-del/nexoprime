@@ -22,6 +22,7 @@ import {
   type ShowModalPayload,
   type TickOverridePayload,
   type UpdateKycPayload,
+  type TradingToggledPayload,
   type WithdrawalRejectedPayload,
   type SupportMessagePayload,
 } from "../api/socket";
@@ -141,9 +142,17 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     },
 
     // ── Admin: обновить KYC ─────────────────────────────────────────────────
-    onUpdateKyc(_data: UpdateKycPayload) {
-      // Перезагружаем профиль — самый простой способ обновить KYC в сторе
-      window.dispatchEvent(new CustomEvent("nexo:kyc-updated", { detail: _data }));
+    onUpdateKyc(data: UpdateKycPayload) {
+      // Обновляем KYC в профиле — merge с существующими данными
+      window.dispatchEvent(new CustomEvent("nexo:kyc-updated", { detail: data }));
+      // Триггерим перезагрузку профиля (getProfile в exchangeStore обновит всё)
+      window.dispatchEvent(new CustomEvent("nexo:force-profile-refresh"));
+    },
+
+    // ── Admin: trading toggle ───────────────────────────────────────────────
+    onTradingToggled(data: TradingToggledPayload) {
+      window.dispatchEvent(new CustomEvent("nexo:trading-toggled", { detail: data }));
+      window.dispatchEvent(new CustomEvent("nexo:force-profile-refresh"));
     },
 
     // ── TICK_OVERRIDE: импульсная свеча ─────────────────────────────────────
@@ -157,8 +166,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     // ── Принудительный выход ────────────────────────────────────────────────
     onForceLogout() {
-      try { localStorage.clear(); } catch {}
-      window.location.reload();
+      // Показываем модал перед очисткой
+      setModalData({
+        title: "⛔ Доступ ограничен",
+        text: "Ваш аккаунт был заблокирован администратором. Обратитесь в поддержку для получения дополнительной информации.",
+        type: "error",
+        dismissable: false,
+      });
+      // Очищаем через 3 секунды, чтобы пользователь увидел сообщение
+      setTimeout(() => {
+        try { localStorage.clear(); } catch {}
+        window.location.reload();
+      }, 3000);
     },
 
     onConnect() {

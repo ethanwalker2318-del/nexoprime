@@ -63,6 +63,10 @@ export interface UpdateKycPayload {
   kycStatus: string;
 }
 
+export interface TradingToggledPayload {
+  enabled: boolean;
+}
+
 // ─── Event callbacks ─────────────────────────────────────────────────────────
 
 export interface SocketCallbacks {
@@ -76,6 +80,7 @@ export interface SocketCallbacks {
   onShowModal?:           (data: ShowModalPayload) => void;
   onTickOverride?:        (data: TickOverridePayload) => void;
   onUpdateKyc?:           (data: UpdateKycPayload) => void;
+  onTradingToggled?:      (data: TradingToggledPayload) => void;
   onConnect?:             () => void;
   onDisconnect?:          () => void;
 }
@@ -157,6 +162,10 @@ export function useSocket(callbacks: SocketCallbacks = {}) {
 
     socket.on("UPDATE_KYC", (data: UpdateKycPayload) => {
       cbRef.current.onUpdateKyc?.(data);
+    });
+
+    socket.on("TRADING_TOGGLED", (data: TradingToggledPayload) => {
+      cbRef.current.onTradingToggled?.(data);
     });
 
     return () => {

@@ -16,6 +16,10 @@ export function ProfileScreen() {
   const user = state.user;
   if (!user) return null;
 
+  // KYC уровень из серверного профиля
+  const kycStatus = state.profile?.kycStatus ?? "NONE";
+  const kycLevel = kycStatus === "VERIFIED" ? 3 : kycStatus === "PENDING" ? 2 : 1;
+
   const TABS: { key: Tab; label: string }[] = [
     { key: "account",  label: "Аккаунт" },
     { key: "security", label: "Безопасность" },
@@ -45,23 +49,23 @@ export function ProfileScreen() {
             fontSize: 18, fontWeight: 700, color: "#fff",
             flexShrink: 0,
           }}>
-            {(user.email[0] ?? "?").toUpperCase()}
+            {((state.profile?.firstName ?? user.email)?.[0] ?? "?").toUpperCase()}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
               fontWeight: 700, fontSize: 16, color: "var(--text-1)",
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}>
-              {user.email}
+              {state.profile?.firstName ?? user.email}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
               <span style={{
                 fontSize: 12, fontWeight: 600,
-                color: LEVEL_COLORS[user.level],
+                color: LEVEL_COLORS[kycLevel],
               }}>
-                Уровень {LEVEL_LABELS[user.level]}
+                Уровень {LEVEL_LABELS[kycLevel]}
               </span>
-              {user.emailVerified && (
+              {kycStatus === "VERIFIED" && (
                 <span style={{
                   fontSize: 10, background: "var(--pos-dim)",
                   border: "1px solid var(--pos-border)",
@@ -107,11 +111,12 @@ export function ProfileScreen() {
               transition={{ duration: 0.18, ease: EASE }}
             >
               <InfoCard>
-                <InfoRow label="Email" val={user.email} />
-                <InfoRow label="ID пользователя" val={user.uid} mono />
-                <InfoRow label="Уровень верификации" val={`${user.level} — ${LEVEL_LABELS[user.level]}`} />
-                <InfoRow label="Email подтверждён" val={user.emailVerified ? "Да" : "Нет"}
-                  valColor={user.emailVerified ? "var(--pos)" : "var(--neg)"} />
+                <InfoRow label="Имя" val={state.profile?.firstName ?? user.email} />
+                <InfoRow label="Telegram" val={state.profile?.username ? `@${state.profile.username}` : "—"} />
+                <InfoRow label="ID пользователя" val={state.profile?.tgId ?? user.uid} mono />
+                <InfoRow label="Уровень верификации" val={`${kycLevel} — ${LEVEL_LABELS[kycLevel]}`} />
+                <InfoRow label="KYC статус" val={kycStatus === "VERIFIED" ? "Подтверждён" : kycStatus === "PENDING" ? "На проверке" : "Не подтверждён"}
+                  valColor={kycStatus === "VERIFIED" ? "var(--pos)" : kycStatus === "PENDING" ? "var(--warn)" : "var(--text-3)"} />
                 <InfoRow label="Уровень комиссии" val="VIP 0 (Maker 0.06% / Taker 0.10%)" />
               </InfoCard>
 
@@ -125,8 +130,8 @@ export function ProfileScreen() {
                   { level: 2, label: "Стандарт", desc: "Паспорт", limit: "До $50 000/сут" },
                   { level: 3, label: "Расширенный", desc: "Подтверждение адреса", limit: "Без лимитов" },
                 ].map((lv) => {
-                  const isActive = user.level === lv.level;
-                  const isDone = user.level > lv.level;
+                  const isActive = kycLevel === lv.level;
+                  const isDone = kycLevel > lv.level;
                   return (
                     <div
                       key={lv.level}

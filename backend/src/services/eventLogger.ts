@@ -38,7 +38,7 @@ export async function logEvent(
     data: {
       user_id: userId,
       event,
-      meta: meta ?? undefined,
+      meta: meta ? (meta as any) : undefined,
     },
   });
 

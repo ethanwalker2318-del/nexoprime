@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { Bot } from "grammy";
+import type { Bot } from "grammy";
 import type { KycStatus } from "@prisma/client";
 
 // ─── Создать заявку на верификацию ────────────────────────────────────────────
@@ -14,7 +14,7 @@ export async function createKycRequest(
   fullName:    string,
   documentUrl: string,
   selfieUrl?:  string,
-  bot?:        Bot
+  bot?:        Bot<any>
 ): Promise<{ ok: boolean; error?: string }> {
   // Проверяем: нет ли уже активной заявки
   const pending = await prisma.kycRequest.findFirst({

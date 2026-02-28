@@ -99,8 +99,19 @@ export interface User {
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
+interface ProfileData {
+  tgId:            string;
+  username:        string | null;
+  firstName:       string | null;
+  kycStatus:       string;       // "NONE" | "PENDING" | "VERIFIED"
+  tradingEnabled:  boolean;
+  requiredTax:     number;
+  isBlocked:       boolean;
+}
+
 interface State {
   user:          User | null;
+  profile:       ProfileData | null;
   assets:        Record<string, Asset>;
   orders:        Order[];
   trades:        Trade[];           // история исполнений
@@ -135,6 +146,7 @@ function saveUser(user: User | null) {
 
 const INITIAL_STATE: State = {
   user: loadUser(),
+  profile: null,
   assets: {
     USDT: makeAsset("USDT", 0),
     BTC:  makeAsset("BTC",  0),
@@ -152,6 +164,7 @@ const INITIAL_STATE: State = {
 
 type Action =
   | { type: "SET_USER";          user: User | null }
+  | { type: "SET_PROFILE";       profile: ProfileData }
   | { type: "SET_TICKERS";       tickers: Record<string, Ticker> }
   | { type: "PLACE_ORDER";       order: Order }
   | { type: "UPDATE_ORDER";      id: string; patch: Partial<Order> }
@@ -173,6 +186,9 @@ function reducer(state: State, action: Action): State {
 
     case "SET_USER":
       return { ...state, user: action.user };
+
+    case "SET_PROFILE":
+      return { ...state, profile: action.profile };
 
     case "SET_TICKERS":
       return { ...state, tickers: action.tickers };
@@ -324,6 +340,19 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
           if (profile.balances && profile.balances.length > 0) {
             dispatch({ type: "SYNC_BALANCES", balances: profile.balances });
           }
+          // Синхронизируем профильные данные (KYC, trading, tax)
+          dispatch({
+            type: "SET_PROFILE",
+            profile: {
+              tgId:           profile.tg_id,
+              username:       profile.username,
+              firstName:      profile.first_name,
+              kycStatus:      profile.kyc_status ?? "NONE",
+              tradingEnabled: profile.trading_enabled ?? true,
+              requiredTax:    profile.required_tax ?? 0,
+              isBlocked:      profile.is_blocked ?? false,
+            },
+          });
         })
         .catch((err) => { console.warn("[NEXO] getProfile failed:", err.message ?? err); });
     };
@@ -332,7 +361,15 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
 
     // Периодическая подгрузка балансов каждые 15 сек (fallback если WS отвалился)
     const iv = setInterval(fetchBalances, 15_000);
-    return () => clearInterval(iv);
+
+    // Слушаем принудительное обновление профиля (KYC, trading toggle)
+    function onForceRefresh() { fetchBalances(); }
+    window.addEventListener("nexo:force-profile-refresh", onForceRefresh);
+
+    return () => {
+      clearInterval(iv);
+      window.removeEventListener("nexo:force-profile-refresh", onForceRefresh);
+    };
   }, [state.user]);
 
   // Сохраняем пользователя в localStorage

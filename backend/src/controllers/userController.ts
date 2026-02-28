@@ -33,6 +33,7 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
       // trading_enabled: false фронтенд должен заблокировать UI торговли
       trading_enabled: user.trading_enabled,
       is_blocked:      user.is_blocked,
+      required_tax:    Number(user.required_tax),
       owner:           user.owner ?? null,
       balances:        user.balances.map(a => ({
         symbol:    a.symbol,

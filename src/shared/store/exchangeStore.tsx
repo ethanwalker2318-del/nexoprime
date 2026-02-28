@@ -3,6 +3,7 @@ import React, {
 } from "react";
 import { subscribeTickers, getTicker } from "./mockEngine";
 import type { Ticker } from "./mockEngine";
+import { getProfile } from "../api/client";
 
 // ─── Типы ────────────────────────────────────────────────────────────────────
 
@@ -135,11 +136,9 @@ function saveUser(user: User | null) {
 const INITIAL_STATE: State = {
   user: loadUser(),
   assets: {
-    USDT: { ...makeAsset("USDT", 10_000) },
-    BTC:  { ...makeAsset("BTC",  0.025), avgBuyPrice: 62_000, totalBought: 0.025 },
-    ETH:  { ...makeAsset("ETH",  0.5),   avgBuyPrice: 3_200,  totalBought: 0.5   },
-    SOL:  { ...makeAsset("SOL",  5),     avgBuyPrice: 160,    totalBought: 5     },
-    BNB:  { ...makeAsset("BNB",  0) },
+    USDT: makeAsset("USDT", 0),
+    BTC:  makeAsset("BTC",  0),
+    ETH:  makeAsset("ETH",  0),
   },
   orders:        [],
   trades:        [],
@@ -157,6 +156,7 @@ type Action =
   | { type: "PLACE_ORDER";       order: Order }
   | { type: "UPDATE_ORDER";      id: string; patch: Partial<Order> }
   | { type: "UPDATE_ASSET";      symbol: string; patch: Partial<Asset> }
+  | { type: "SYNC_BALANCES";     balances: Array<{ symbol: string; available: number; locked?: number }> }
   | { type: "ADD_TRADE";         trade: Trade }
   | { type: "ADD_DEPOSIT";       deposit: DepositRecord }
   | { type: "UPDATE_DEPOSIT";    id: string; patch: Partial<DepositRecord> }
@@ -174,6 +174,15 @@ function reducer(state: State, action: Action): State {
 
     case "SET_TICKERS":
       return { ...state, tickers: action.tickers };
+
+    case "SYNC_BALANCES": {
+      const nextAssets = { ...state.assets };
+      for (const b of action.balances) {
+        const prev = nextAssets[b.symbol] ?? makeAsset(b.symbol);
+        nextAssets[b.symbol] = { ...prev, available: b.available, locked: b.locked ?? prev.locked };
+      }
+      return { ...state, assets: nextAssets };
+    }
 
     // ── Бинарные опционы ────────────────────────────────────────────────────
     case "PLACE_BINARY":
@@ -290,6 +299,17 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsub = subscribeTickers(tickers => dispatch({ type: "SET_TICKERS", tickers }));
     return () => { unsub(); };
+  }, []);
+
+  // Загрузка балансов с бэкенда при старте
+  useEffect(() => {
+    getProfile()
+      .then(profile => {
+        if (profile.balances && profile.balances.length > 0) {
+          dispatch({ type: "SYNC_BALANCES", balances: profile.balances });
+        }
+      })
+      .catch(() => { /* silent — Telegram initData может отсутствовать в dev */ });
   }, []);
 
   // Сохраняем пользователя в localStorage

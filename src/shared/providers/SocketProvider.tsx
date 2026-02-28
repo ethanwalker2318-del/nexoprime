@@ -57,11 +57,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { connected, emit, placeBinary, logEvent } = useSocket({
     // ── Баланс ──────────────────────────────────────────────────────────────
     onBalanceUpdate(data: BalanceUpdatePayload) {
-      dispatch({
-        type: "UPDATE_ASSET",
-        symbol: data.symbol,
-        patch: { available: data.available },
-      });
+      if (data.balances && Array.isArray(data.balances)) {
+        dispatch({ type: "SYNC_BALANCES", balances: data.balances });
+      }
     },
 
     // ── Результат бинарного трейда ──────────────────────────────────────────

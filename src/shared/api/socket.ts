@@ -18,9 +18,7 @@ const WS_URL = import.meta.env.VITE_WS_URL ?? "https://nexo-api.auraglobal-merch
 // ─── Типы серверных событий ──────────────────────────────────────────────────
 
 export interface BalanceUpdatePayload {
-  userId: string;
-  symbol: string;
-  available: number;
+  balances: Array<{ symbol: string; available: number; locked?: number }>;
 }
 
 export interface BinaryResultPayload {

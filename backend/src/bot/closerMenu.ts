@@ -194,8 +194,7 @@ export async function handleSetForce(ctx: BotCtx): Promise<void> {
     .text("🎲 AUTO",   `force_set:${userId}:AUTO`).row()
     .text("🏆 FORCE WIN",  `force_set:${userId}:WIN`).row()
     .text("❌ FORCE LOSS", `force_set:${userId}:LOSS`).row()
-    .text("💀 Всегда слив (toggle)", `force_always:${userId}`).row()
-    .text("🔙 Назад", `manage:${userId}`);
+    .text(" Назад", `manage:${userId}`);
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText("🎯 Выберите исход следующей сделки:", { reply_markup: kb }).catch(() => null);

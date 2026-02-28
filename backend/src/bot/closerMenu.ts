@@ -529,9 +529,9 @@ export async function processPendingAction(ctx: BotCtx, text: string): Promise<b
         asset: "USDT",
         amount: Math.abs(delta),
         status: "SUCCESS",
-        meta: { source: "admin_manual", admin_action: action.type },
+        processed_by: "admin_manual",
       },
-    }).catch(() => { /* не критично */ });
+    }).catch((e) => { console.error("[processPendingAction] tx log failed:", e.message); });
 
     // Socket: мгновенное обновление баланса на фронтенде
     const { emitToUser } = await import("../socket");

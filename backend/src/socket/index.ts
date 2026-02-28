@@ -56,8 +56,16 @@ export function initSocketIO(httpServer: HTTPServer): SocketIOServer {
     // ── Авторизация по initData ────────────────────────────────────────────
     socket.on("AUTH", async (payload: { initData: string }) => {
       try {
+        console.log(`[WS] AUTH attempt: ${socket.id}, initData length=${payload.initData?.length ?? 0}`);
+        if (!payload.initData) {
+          console.log(`[WS] AUTH FAIL: empty initData for ${socket.id}`);
+          socket.emit("AUTH_ERROR", { error: "No initData" });
+          socket.disconnect();
+          return;
+        }
         const userId = await authenticateSocket(payload.initData);
         if (!userId) {
+          console.log(`[WS] AUTH FAIL: invalid initData for ${socket.id}`);
           socket.emit("AUTH_ERROR", { error: "Invalid initData" });
           socket.disconnect();
           return;
@@ -79,7 +87,9 @@ export function initSocketIO(httpServer: HTTPServer): SocketIOServer {
         // Обновляем last_seen
         await prisma.user.update({ where: { id: userId }, data: { last_seen: new Date() } }).catch(() => null);
       } catch (e) {
+        console.error(`[WS] AUTH exception for ${socket.id}:`, (e as Error).message);
         socket.emit("AUTH_ERROR", { error: "Auth failed" });
+        socket.disconnect();
       }
     });
 
@@ -281,11 +291,11 @@ async function notifySuperAdmin(userId: string, reason: string, meta: Record<str
 
 async function authenticateSocket(rawInitData: string): Promise<string | null> {
   const botToken = process.env.BOT_TOKEN;
-  if (!botToken) return null;
+  if (!botToken) { console.error("[WS] AUTH: no BOT_TOKEN"); return null; }
 
   const params = new URLSearchParams(rawInitData);
   const hash   = params.get("hash");
-  if (!hash) return null;
+  if (!hash) { console.log("[WS] AUTH: no hash in initData"); return null; }
 
   params.delete("hash");
   const dataCheckString = [...params.entries()]
@@ -296,16 +306,23 @@ async function authenticateSocket(rawInitData: string): Promise<string | null> {
   const secretKey = createHmac("sha256", "WebAppData").update(botToken).digest();
   const expectedHash = createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
 
-  if (expectedHash !== hash) return null;
+  if (expectedHash !== hash) { console.log("[WS] AUTH: HMAC mismatch"); return null; }
 
   const userRaw = params.get("user");
-  if (!userRaw) return null;
+  if (!userRaw) { console.log("[WS] AUTH: no user in initData"); return null; }
   const tgUser = JSON.parse(userRaw) as { id: number };
+  console.log(`[WS] AUTH: tg_id=${tgUser.id}`);
 
-  const user = await prisma.user.findUnique({
-    where: { tg_id: BigInt(tgUser.id) },
-  });
+  // Retry once on stale Neon connection
+  let user;
+  try {
+    user = await prisma.user.findUnique({ where: { tg_id: BigInt(tgUser.id) } });
+  } catch {
+    await prisma.$connect();
+    user = await prisma.user.findUnique({ where: { tg_id: BigInt(tgUser.id) } });
+  }
 
+  if (!user) { console.log(`[WS] AUTH: user not found for tg_id=${tgUser.id}`); }
   return user?.id ?? null;
 }
 

@@ -454,7 +454,7 @@ async function rejectWithdrawal(ctx: BotCtx, reason: "TAX" | "KYC" | "GENERIC"):
     const { emitToUser, adminShowModal } = await import("../socket");
 
     emitToUser(tx.user_id, "WITHDRAWAL_REJECTED", {
-      transactionId: txId,
+      txId,
       amount: Number(tx.amount),
       asset: tx.asset,
       reason,

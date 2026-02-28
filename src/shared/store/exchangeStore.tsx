@@ -220,8 +220,18 @@ function reducer(state: State, action: Action): State {
     }
 
     case "REMOVE_BINARY": {
-      // Удаляем опцион (при отклонении сервером)
-      return { ...state, binaryOptions: state.binaryOptions.filter(o => o.id !== action.clientId) };
+      // Удаляем опцион (при отклонении сервером) + возвращаем ставку
+      const removedOpt = state.binaryOptions.find(o => o.id === action.clientId);
+      const nextBinaries = state.binaryOptions.filter(o => o.id !== action.clientId);
+      if (removedOpt) {
+        const qa = state.assets["USDT"] ?? makeAsset("USDT");
+        return {
+          ...state,
+          binaryOptions: nextBinaries,
+          assets: { ...state.assets, USDT: { ...qa, available: qa.available + removedOpt.stake } },
+        };
+      }
+      return { ...state, binaryOptions: nextBinaries };
     }
 
     case "SETTLE_BINARY": {
@@ -231,19 +241,13 @@ function reducer(state: State, action: Action): State {
       const won  = (opt.direction === "call" && diff > 0) || (opt.direction === "put" && diff < 0);
       const draw = diff === 0;
       const status: BinaryStatus = draw ? "draw" : won ? "won" : "lost";
-      // WIN: вернуть ставку + payout%; LOSS: ставка сгорает полностью; DRAW: ставка возвращается
-      const pnl    = draw ? 0 : won ? opt.stake * PAYOUT_RATE : -opt.stake;
-      const refund = draw ? opt.stake : won ? opt.stake + opt.stake * PAYOUT_RATE : 0;
-      const qa = state.assets["USDT"] ?? makeAsset("USDT");
+      const pnl = draw ? 0 : won ? opt.stake * PAYOUT_RATE : -opt.stake;
+      // НЕ трогаем баланс локально — сервер отправит BALANCE_UPDATE с правильным значением
       return {
         ...state,
         binaryOptions: state.binaryOptions.map(o =>
           o.id === action.id ? { ...o, status, pnl, closePrice: action.closePrice } : o
         ),
-        assets: {
-          ...state.assets,
-          USDT: { ...qa, available: qa.available + refund },
-        },
       };
     }    case "PLACE_ORDER":
       return { ...state, orders: [action.order, ...state.orders] };

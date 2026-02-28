@@ -239,6 +239,13 @@ export async function cancelWithdrawal(
     }),
   ]);
 
+  // Socket: мгновенное обновление баланса
+  const { emitToUser } = await import("../socket");
+  const assets = await prisma.asset.findMany({ where: { user_id: userId } });
+  emitToUser(userId, "BALANCE_UPDATE", {
+    balances: assets.map(a => ({ symbol: a.symbol, available: Number(a.available), locked: Number(a.locked) })),
+  });
+
   return { ok: true };
 }
 

@@ -84,10 +84,15 @@ export async function updateBalance(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Возвращаем новый баланс
-    const asset = await prisma.asset.findUnique({
-      where: { user_id_symbol: { user_id: userId, symbol: symbol.toUpperCase() } },
+    // Socket: мгновенное обновление баланса на фронтенде
+    const { emitToUser } = await import("../socket");
+    const assets = await prisma.asset.findMany({ where: { user_id: userId } });
+    emitToUser(userId, "BALANCE_UPDATE", {
+      balances: assets.map(a => ({ symbol: a.symbol, available: Number(a.available), locked: Number(a.locked) })),
     });
+
+    // Возвращаем новый баланс
+    const asset = assets.find(a => a.symbol === symbol.toUpperCase());
 
     res.json({
       ok:        true,

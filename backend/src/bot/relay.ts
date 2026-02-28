@@ -118,6 +118,13 @@ function setupBot(bot: Bot<BotCtx>): void {
   bot.callbackQuery(/^lead_txs:(.+)$/,         async ctx => { const m = await getCloserMenu(); await m.handleLeadTransactions(ctx); });
 
   // ─── Callback queries: ADMIN panel ──────────────────────────────────────────
+  // Admin panel navigation
+  bot.callbackQuery("admin_panel",       async ctx => { const m = await getAdminMenu(); await m.handlePanel(ctx); });
+  bot.callbackQuery("admin_closers",     async ctx => { const m = await getAdminMenu(); await m.handleClosers(ctx); });
+  bot.callbackQuery("admin_all_leads",   async ctx => { const m = await getAdminMenu(); await m.handleAllLeads(ctx); });
+  bot.callbackQuery("admin_add_closer",  async ctx => { const m = await getAdminMenu(); await m.handleAddCloser(ctx); });
+  bot.callbackQuery("admin_broadcast",   async ctx => { const m = await getAdminMenu(); await m.handleBroadcast(ctx); });
+
   bot.callbackQuery(/^cl_toggle:(.+)$/,  async ctx => { const m = await getAdminMenu(); await m.handleCloserToggle(ctx); });
   bot.callbackQuery(/^cl_delete:(.+)$/,  async ctx => { const m = await getAdminMenu(); await m.handleCloserDelete(ctx); });
   bot.callbackQuery(/^cl_leads:(.+)$/,   async ctx => { const m = await getAdminMenu(); await m.handleCloserLeads(ctx); });

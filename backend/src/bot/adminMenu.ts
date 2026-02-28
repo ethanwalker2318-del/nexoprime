@@ -31,9 +31,13 @@ export async function handleClosers(ctx: BotCtx): Promise<void> {
   });
 
   if (closers.length === 0) {
-    await ctx.reply("Клоузеров пока нет.");
+    const emptyKb = new InlineKeyboard().text("◀️ Назад", "admin_panel");
+    await ctx.reply("Клоузеров пока нет.", { reply_markup: emptyKb });
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
     return;
   }
+
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
 
   for (const cl of closers) {
     const active = cl.is_active ? "🟢 Активен" : "🔴 Заблокирован";
@@ -54,6 +58,10 @@ export async function handleClosers(ctx: BotCtx): Promise<void> {
       { parse_mode: "HTML", reply_markup: kb }
     );
   }
+
+  // Кнопка возврата после списка
+  const backKb = new InlineKeyboard().text("◀️ Назад к панели", "admin_panel");
+  await ctx.reply("─", { reply_markup: backKb });
 }
 
 // ─── Toggle Closer active/blocked ─────────────────────────────────────────────
@@ -152,7 +160,12 @@ export async function handleAllLeads(ctx: BotCtx): Promise<void> {
     take: 50,
   });
 
-  if (leads.length === 0) { await ctx.reply("Лидов нет."); return; }
+  if (leads.length === 0) {
+    const emptyKb = new InlineKeyboard().text("◀️ Назад", "admin_panel");
+    await ctx.reply("Лидов нет.", { reply_markup: emptyKb });
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
+    return;
+  }
 
   const lines: string[] = ["📋 <b>Все лиды</b> (последние 50)\n"];
   for (const lead of leads) {
@@ -165,10 +178,13 @@ export async function handleAllLeads(ctx: BotCtx): Promise<void> {
 
   // Telegram ограничивает сообщение 4096 символами — разбиваем
   const text = lines.join("\n");
+  const backKb = new InlineKeyboard().text("◀️ Назад к панели", "admin_panel");
   const chunks = text.match(/[\s\S]{1,4000}/g) ?? [text];
-  for (const chunk of chunks) {
-    await ctx.reply(chunk, { parse_mode: "HTML" });
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1;
+    await ctx.reply(chunks[i], { parse_mode: "HTML", reply_markup: isLast ? backKb : undefined });
   }
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
 }
 
 // ─── Reassign Lead → set session ──────────────────────────────────────────────
@@ -240,6 +256,7 @@ export async function handleAddCloser(ctx: BotCtx): Promise<void> {
 
   const link = `https://t.me/${getBotUsername()}?start=joincl_${joinToken}`;
 
+  const backKb = new InlineKeyboard().text("◀️ Назад к панели", "admin_panel");
   await ctx.reply(
     [
       `🔗 <b>Ссылка-приглашение для нового клоузера:</b>`,
@@ -249,8 +266,9 @@ export async function handleAddCloser(ctx: BotCtx): Promise<void> {
       `Отправь эту ссылку человеку — когда он нажмёт <b>Start</b>, он автоматически станет клоузером.`,
       `Ссылка одноразовая.`,
     ].join("\n"),
-    { parse_mode: "HTML" }
+    { parse_mode: "HTML", reply_markup: backKb }
   );
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
 }
 
 // processAddCloser больше не нужен (совместимость — возвращает false)
@@ -488,8 +506,20 @@ export async function handlePanel(ctx: BotCtx): Promise<void> {
     `⏰ ${new Date().toISOString().slice(0, 19).replace("T", " ")} UTC`,
   ].join("\n");
 
+  const kb = new InlineKeyboard()
+    .text("🧑‍💼 Клоузеры", "admin_closers").text("👥 Все лиды", "admin_all_leads").row()
+    .text("➕ Добавить клоузера", "admin_add_closer").row()
+    .text("📢 Рассылка", "admin_broadcast").text("🔄 Обновить", "admin_panel");
+
   const chunks = text.match(/[\s\S]{1,4000}/g) ?? [text];
-  for (const chunk of chunks) {
-    await ctx.reply(chunk, { parse_mode: "HTML" });
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1;
+    const opts: any = { parse_mode: "HTML", reply_markup: isLast ? kb : undefined };
+    if (ctx.callbackQuery && i === 0) {
+      await ctx.editMessageText(chunks[i], opts).catch(() => ctx.reply(chunks[i], opts));
+    } else {
+      await ctx.reply(chunks[i], opts);
+    }
   }
+  if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
 }

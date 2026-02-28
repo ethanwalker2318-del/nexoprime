@@ -324,23 +324,12 @@ function ActiveOptionCard({ option, currentPrice, entryColor }: {
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-1)" }}>{option.symbol}</span>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: winning ? "var(--pos)" : "var(--neg)", fontVariantNumeric: "tabular-nums", fontFamily: "monospace" }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-1)", fontVariantNumeric: "tabular-nums", fontFamily: "monospace" }}>
             {fmtMs(remaining)}
-          </div>
-          <div style={{ fontSize: 9, color: winning ? "var(--pos)" : "var(--neg)" }}>
-            {winning ? "Побеждает" : "Проигрывает"}
           </div>
         </div>
       </div>
-      <div style={{ height: 4, background: "var(--surface-3)", borderRadius: 2, overflow: "hidden", marginBottom: 8 }}>
-        <div style={{
-          height: "100%", width: `${pct}%`,
-          background: winning
-            ? "linear-gradient(90deg,var(--pos),#2adf99)"
-            : "linear-gradient(90deg,var(--neg),#ff8c99)",
-          borderRadius: 2, transition: "width 0.25s linear",
-        }} />
-      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "2px 8px", fontSize: 11 }}>
         <div>
           <div style={{ fontSize: 9, color: "var(--text-4)" }}>Ставка</div>

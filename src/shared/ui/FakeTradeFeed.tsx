@@ -58,7 +58,7 @@ export function FakeTradeFeed() {
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const scheduleNext = useCallback(() => {
-    const delay = 15000 + Math.random() * 15000; // 15-30 sec
+    const delay = 45000 + Math.random() * 45000; // 45-90 sec
     timerRef.current = setTimeout(() => {
       const trade = generateFakeTrade();
       setItems(prev => [trade, ...prev].slice(0, MAX_VISIBLE));

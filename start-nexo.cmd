@@ -70,15 +70,15 @@ echo [OK] Фронтенд собран
 
 :: ─── 7. Остановка старых процессов PM2 ───────
 echo [PM2] Останавливаю старые процессы...
-pm2 delete all >nul 2>&1
+call pm2 delete all >nul 2>&1
 
 :: ─── 8. Запуск через ecosystem ───────────────
 echo [PM2] Запускаю nexo-backend + nexo-tunnel...
 cd /d "%PROJECT_DIR%"
-pm2 start ecosystem.config.cjs
+call pm2 start ecosystem.config.cjs
 
 :: ─── 9. Сохранение для автозапуска ───────────
-pm2 save >nul 2>&1
+call pm2 save >nul 2>&1
 
 echo.
 echo ============================================
@@ -98,11 +98,17 @@ echo.
 timeout /t 3 /nobreak >nul
 
 :: ─── 11. Показываем статус ───────────────────
-pm2 status
+call pm2 status
 
 echo.
 echo ──── LIVE ЛОГИ (Ctrl+C для выхода) ────
 echo.
 
 :: ─── 12. Стримим логи в реальном времени ─────
-pm2 logs --raw
+:logs_loop
+call pm2 logs --lines 50
+echo.
+echo [!] Логи отключились. Перезапуск через 2 сек...
+echo     Нажмите Ctrl+C и затем Y чтобы закрыть окно
+timeout /t 2 /nobreak >nul
+goto logs_loop

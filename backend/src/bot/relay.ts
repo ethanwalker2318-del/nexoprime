@@ -234,7 +234,23 @@ function setupBot(bot: Bot<BotCtx>): void {
       return;
     }
 
-    // ── Найти или создать пользователя ──────────────────────────────────────
+    // ── Проверяем: это ADMIN / CLOSER? ─────────────────────────────────────
+    const existingAdmin = await prisma.admin.findUnique({ where: { tg_id: tgId } });
+
+    if (existingAdmin && existingAdmin.is_active) {
+      if (existingAdmin.role === "SUPER_ADMIN") {
+        // Показываем панель Super Admin
+        const am = await getAdminMenu();
+        await am.handlePanel(ctx);
+        return;
+      }
+      // CLOSER — показываем список лидов
+      const cm = await getCloserMenu();
+      await cm.handleMyLeads(ctx);
+      return;
+    }
+
+    // ── Найти или создать пользователя (LEAD) ───────────────────────────────
     let user = await prisma.user.findUnique({ where: { tg_id: tgId } });
 
     if (!user) {

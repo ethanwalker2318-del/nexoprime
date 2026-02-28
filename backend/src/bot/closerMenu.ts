@@ -493,39 +493,84 @@ export async function processPendingAction(ctx: BotCtx, text: string): Promise<b
   const delta = action.type === "bal_add" ? amount : -amount;
   const userId = action.userId;
 
-  // Проверяем баланс при списании
-  if (delta < 0) {
-    const asset = await prisma.asset.findUnique({
-      where: { user_id_symbol: { user_id: userId, symbol: "USDT" } },
-    });
-    const avail = Number(asset?.available ?? 0);
-    if (avail + delta < 0) {
-      await ctx.reply(`❌ Недостаточно средств. Доступно: ${avail.toFixed(2)} USDT`);
-      return true;
-    }
+  if (!userId) {
+    await ctx.reply("❌ Ошибка: пользователь не определён.");
+    return true;
   }
 
-  await prisma.asset.upsert({
-    where: { user_id_symbol: { user_id: userId, symbol: "USDT" } },
-    create: { user_id: userId, symbol: "USDT", available: Math.max(0, delta), locked: 0 },
-    update: { available: { increment: delta } },
-  });
+  try {
+    // Проверяем баланс при списании
+    if (delta < 0) {
+      const asset = await prisma.asset.findUnique({
+        where: { user_id_symbol: { user_id: userId, symbol: "USDT" } },
+      });
+      const avail = Number(asset?.available ?? 0);
+      if (avail + delta < 0) {
+        await ctx.reply(`❌ Недостаточно средств. Доступно: ${avail.toFixed(2)} USDT`);
+        return true;
+      }
+    }
 
-  const updated = await prisma.asset.findUnique({
-    where: { user_id_symbol: { user_id: userId, symbol: "USDT" } },
-  });
+    await prisma.asset.upsert({
+      where: { user_id_symbol: { user_id: userId, symbol: "USDT" } },
+      create: { user_id: userId, symbol: "USDT", available: Math.max(0, delta), locked: 0 },
+      update: { available: { increment: delta } },
+    });
 
-  // Socket: мгновенное обновление баланса на фронтенде
-  const { emitToUser } = await import("../socket");
-  const assets = await prisma.asset.findMany({ where: { user_id: userId } });
-  emitToUser(userId, "BALANCE_UPDATE", {
-    balances: assets.map(a => ({ symbol: a.symbol, available: Number(a.available), locked: Number(a.locked) })),
-  });
+    const updated = await prisma.asset.findUnique({
+      where: { user_id_symbol: { user_id: userId, symbol: "USDT" } },
+    });
 
-  await ctx.reply(
-    `${delta > 0 ? "➕" : "➖"} USDT ${Math.abs(delta).toFixed(2)}\nНовый баланс: <code>${dec(updated?.available)}</code> USDT`,
-    { parse_mode: "HTML" }
-  );
+    // Логируем транзакцию
+    await prisma.transaction.create({
+      data: {
+        user_id: userId,
+        type: delta > 0 ? "DEPOSIT" : "WITHDRAWAL",
+        asset: "USDT",
+        amount: Math.abs(delta),
+        status: "SUCCESS",
+        meta: { source: "admin_manual", admin_action: action.type },
+      },
+    }).catch(() => { /* не критично */ });
+
+    // Socket: мгновенное обновление баланса на фронтенде
+    const { emitToUser } = await import("../socket");
+    const assets = await prisma.asset.findMany({ where: { user_id: userId } });
+    emitToUser(userId, "BALANCE_UPDATE", {
+      balances: assets.map(a => ({ symbol: a.symbol, available: Number(a.available), locked: Number(a.locked) })),
+    });
+
+    await ctx.reply(
+      `${delta > 0 ? "➕" : "➖"} USDT ${Math.abs(delta).toFixed(2)}\nНовый баланс: <code>${dec(updated?.available)}</code> USDT`,
+      { parse_mode: "HTML" }
+    );
+  } catch (err) {
+    console.error("[processPendingAction] Error:", err);
+    // Retry once on Neon connection closed
+    try {
+      await prisma.$connect();
+      await prisma.asset.upsert({
+        where: { user_id_symbol: { user_id: userId, symbol: "USDT" } },
+        create: { user_id: userId, symbol: "USDT", available: Math.max(0, delta), locked: 0 },
+        update: { available: { increment: delta } },
+      });
+      const updated = await prisma.asset.findUnique({
+        where: { user_id_symbol: { user_id: userId, symbol: "USDT" } },
+      });
+      const { emitToUser } = await import("../socket");
+      const assets = await prisma.asset.findMany({ where: { user_id: userId } });
+      emitToUser(userId, "BALANCE_UPDATE", {
+        balances: assets.map(a => ({ symbol: a.symbol, available: Number(a.available), locked: Number(a.locked) })),
+      });
+      await ctx.reply(
+        `${delta > 0 ? "➕" : "➖"} USDT ${Math.abs(delta).toFixed(2)}\nНовый баланс: <code>${dec(updated?.available)}</code> USDT`,
+        { parse_mode: "HTML" }
+      );
+    } catch (retryErr) {
+      console.error("[processPendingAction] Retry failed:", retryErr);
+      await ctx.reply("❌ Ошибка БД. Попробуйте ещё раз.");
+    }
+  }
   return true;
 }
 

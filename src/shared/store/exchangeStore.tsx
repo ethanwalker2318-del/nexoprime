@@ -318,13 +318,21 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
 
   // Загрузка балансов с бэкенда при старте и при изменении user
   useEffect(() => {
-    getProfile()
-      .then(profile => {
-        if (profile.balances && profile.balances.length > 0) {
-          dispatch({ type: "SYNC_BALANCES", balances: profile.balances });
-        }
-      })
-      .catch(() => { /* silent — Telegram initData может отсутствовать в dev */ });
+    const fetchBalances = () => {
+      getProfile()
+        .then(profile => {
+          if (profile.balances && profile.balances.length > 0) {
+            dispatch({ type: "SYNC_BALANCES", balances: profile.balances });
+          }
+        })
+        .catch(() => { /* silent — Telegram initData может отсутствовать в dev */ });
+    };
+
+    fetchBalances();
+
+    // Периодическая подгрузка балансов каждые 15 сек (fallback если WS отвалился)
+    const iv = setInterval(fetchBalances, 15_000);
+    return () => clearInterval(iv);
   }, [state.user]);
 
   // Сохраняем пользователя в localStorage

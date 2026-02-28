@@ -469,6 +469,16 @@ export function TradeScreen() {
     return () => clearInterval(iv);
   }, [pair, tfLabel]);
 
+  // Слушаем отказ сервера по сделке
+  useEffect(() => {
+    function onRejected(e: Event) {
+      const reason = (e as CustomEvent).detail as string;
+      showToast(reason, false);
+    }
+    window.addEventListener("nexo:trade-rejected", onRejected);
+    return () => window.removeEventListener("nexo:trade-rejected", onRejected);
+  }, []);
+
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 2500);

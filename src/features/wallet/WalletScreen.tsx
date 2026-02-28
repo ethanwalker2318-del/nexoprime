@@ -210,92 +210,108 @@ export function WalletScreen() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18, ease: EASE }}
             >
-              {/* Выбор актива */}
-              <AssetSelector assets={ASSETS} value={selAsset} onChange={changeAsset} />
-
               {/* Баланс */}
               <div style={{
                 background: "var(--surface-2)", borderRadius: "var(--r-md)",
-                padding: "12px 14px", marginBottom: 14,
+                padding: "12px 14px", marginBottom: 16,
                 border: "1px solid var(--line-1)", display: "flex", justifyContent: "space-between",
               }}>
-                <span style={{ fontSize: 12, color: "var(--text-3)" }}>Текущий баланс</span>
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>Текущий баланс USDT</span>
                 <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-1)" }}>
-                  {fmtNum(totalAsset)} {selAsset}
+                  ${fmtNum((state.assets["USDT"]?.available ?? 0) + (state.assets["USDT"]?.locked ?? 0))}
                 </span>
               </div>
 
-              {/* Кнопка получить адрес */}
-              {!activeDeposit ? (
+              {/* Способ 1: Рубли */}
+              <div style={{
+                background: "var(--surface-1)", borderRadius: "var(--r-lg)",
+                padding: "16px", border: "1px solid var(--line-1)", marginBottom: 12,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: "50%",
+                    background: "var(--pos-dim)", border: "1px solid var(--pos-border)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 18,
+                  }}>₽</div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text-1)" }}>
+                      Перевод в рублях
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-3)" }}>
+                      Банковская карта / СБП
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 12, lineHeight: 1.5 }}>
+                  Свяжитесь с вашим менеджером для получения реквизитов. После перевода баланс будет зачислен в течение 15 минут.
+                </div>
                 <button
-                  onClick={handleDeposit}
+                  onClick={() => {
+                    window.open("https://t.me/nexo_prime_bot", "_blank");
+                    showToast("Напишите менеджеру для пополнения");
+                  }}
                   style={{
-                    width: "100%", padding: "13px",
+                    width: "100%", padding: "12px",
+                    background: "var(--pos)", border: "none",
+                    borderRadius: "var(--r-md)", color: "#fff",
+                    fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  }}
+                >
+                  💬 Написать менеджеру
+                </button>
+              </div>
+
+              {/* Способ 2: Криптовалюта */}
+              <div style={{
+                background: "var(--surface-1)", borderRadius: "var(--r-lg)",
+                padding: "16px", border: "1px solid var(--line-1)", marginBottom: 12,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: "50%",
+                    background: "var(--accent-dim)", border: "1px solid var(--accent-border)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 18,
+                  }}>₿</div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text-1)" }}>
+                      Пополнение криптой
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-3)" }}>
+                      USDT (TRC-20) / BTC / ETH
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 12, lineHeight: 1.5 }}>
+                  Отправьте криптовалюту через CryptoBot. Зачисление автоматическое.
+                </div>
+                <button
+                  onClick={() => {
+                    window.open("https://t.me/CryptoBot", "_blank");
+                    showToast("Перейдите в CryptoBot для оплаты");
+                  }}
+                  style={{
+                    width: "100%", padding: "12px",
                     background: "var(--accent)", border: "none",
                     borderRadius: "var(--r-md)", color: "#fff",
                     fontSize: 14, fontWeight: 700, cursor: "pointer",
-                    marginBottom: 14,
                   }}
                 >
-                  Получить адрес {selAsset}
+                  🔗 Открыть CryptoBot
                 </button>
-              ) : (
-                <div style={{
-                  background: "var(--surface-1)", borderRadius: "var(--r-lg)",
-                  padding: "16px", border: "1px solid var(--line-1)", marginBottom: 14,
-                }}>
-                  <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 8 }}>
-                    Адрес для пополнения {selAsset}
-                  </div>
+              </div>
 
-                  {/* Mock QR */}
-                  <div style={{
-                    width: 100, height: 100, margin: "0 auto 12px",
-                    background: "var(--surface-2)", borderRadius: "var(--r-sm)",
-                    border: "1px solid var(--line-2)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 9, color: "var(--text-4)", textAlign: "center",
-                  }}>
-                    QR<br />mock
-                  </div>
-
-                  <div style={{
-                    background: "var(--surface-2)", borderRadius: "var(--r-sm)",
-                    padding: "10px 12px", fontSize: 11,
-                    color: "var(--text-2)", wordBreak: "break-all",
-                    border: "1px solid var(--line-1)", marginBottom: 10,
-                    fontFamily: "monospace",
-                  }}>
-                    {activeDeposit.address}
-                  </div>
-
-                  <button
-                    onClick={() => handleCopyAddr(activeDeposit.address)}
-                    style={{
-                      width: "100%", padding: "10px",
-                      background: copiedAddr ? "var(--pos-dim)" : "var(--surface-3)",
-                      border: `1px solid ${copiedAddr ? "var(--pos-border)" : "var(--line-1)"}`,
-                      borderRadius: "var(--r-sm)",
-                      color: copiedAddr ? "var(--pos)" : "var(--text-2)",
-                      fontSize: 13, fontWeight: 600, cursor: "pointer",
-                      marginBottom: 12,
-                      transition: "all var(--dur-fast)",
-                    }}
-                  >
-                    {copiedAddr ? "✓ Скопировано" : "Скопировать адрес"}
-                  </button>
-
-                  {/* Статус */}
-                  <DepositStatus dep={activeDeposit} />
-                </div>
-              )}
-
+              {/* Инфо */}
               <div style={{
                 fontSize: 11, color: "var(--text-4)",
-                background: "var(--warn-dim)", borderRadius: "var(--r-sm)",
-                padding: "8px 12px", border: "1px solid var(--warn)",
+                background: "var(--surface-2)", borderRadius: "var(--r-sm)",
+                padding: "10px 12px", border: "1px solid var(--line-1)",
+                lineHeight: 1.5,
               }}>
-                ⚠️ Отправляйте только {selAsset} на этот адрес
+                💡 Минимальная сумма пополнения: <b style={{ color: "var(--text-2)" }}>$10</b><br />
+                Зачисление рублёвых переводов — до 15 мин.<br />
+                Криптовалюта — от 1 до 30 мин в зависимости от сети.
               </div>
             </motion.div>
           )}
@@ -510,13 +526,13 @@ export function WalletScreen() {
             exit={{ opacity: 0, y: 20 }}
             style={{
               position: "absolute",
-              bottom: "calc(var(--nav-height) + var(--safe-bottom) + 12px)",
+              bottom: 24,
               left: "50%", transform: "translateX(-50%)",
               background: "var(--pos)", color: "#fff",
               padding: "10px 20px", borderRadius: 20,
               fontSize: 13, fontWeight: 600,
               boxShadow: "0 4px 16px rgba(0,0,0,.4)",
-              whiteSpace: "nowrap", zIndex: 70,
+              whiteSpace: "nowrap", zIndex: 120,
             }}
           >
             {toast}

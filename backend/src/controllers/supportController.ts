@@ -66,16 +66,9 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
       }
     }
 
-    // Socket.io → уведомляем фронт о новом сообщении (если нужно)
-    try {
-      const { emitToUser } = await import("../socket");
-      emitToUser(req.tgUser.id, "NEW_SUPPORT_MESSAGE", {
-        id:        msg.id,
-        sender:    msg.sender,
-        text:      msg.text,
-        createdAt: msg.created_at,
-      });
-    } catch (_) {}
+    // Socket.io → НЕ отправляем NEW_SUPPORT_MESSAGE обратно отправителю (USER),
+    // т.к. фронт уже добавил сообщение оптимистично и заменяет его по ответу API.
+    // Эмитим только для ADMIN/CLOSER-отправленных сообщений (см. reply endpoint).
 
     await logEvent(req.tgUser.id, "SUPPORT_MESSAGE", {});
 

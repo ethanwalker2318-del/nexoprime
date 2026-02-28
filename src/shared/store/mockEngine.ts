@@ -26,12 +26,15 @@ const candleStore: Record<string, Record<string, Candle[]>> = {};
 // Текущие незакрытые свечи: openCandle[symbol][tf]
 const openCandle: Record<string, Record<string, Candle>> = {};
 
-// Генерируем историю свечей (50 закрытых) для всех пар/ТФ
+// Генерируем историю свечей (50 закрытых) для всех пар/ТФ.
+// Вызываем ПОСЛЕ инициализации state, чтобы последняя свеча совпала с текущей ценой тикера.
 function initCandles() {
   const now = Date.now();
   for (const symbol of Object.keys(INITIAL)) {
     candleStore[symbol] = {};
     openCandle[symbol]  = {};
+    // Берём актуальную цену тикера как конечную точку истории
+    const targetPrice = state[symbol]?.price ?? INITIAL[symbol]!.price;
     for (const [tf, ms] of Object.entries(TF_MS)) {
       const BASE_PRICE = INITIAL[symbol]!.price;
       const candles: Candle[] = [];
@@ -49,10 +52,18 @@ function initCandles() {
         }
         candles.push({ ts, open, high, low, close, volume: rng(50, 500) * (BASE_PRICE * 0.0001) });
       }
+      // Масштабируем свечи так, чтобы последняя close == цена тикера (убираем скачок)
+      const scale = targetPrice / (price || targetPrice);
+      for (const c of candles) {
+        c.open  *= scale;
+        c.high  *= scale;
+        c.low   *= scale;
+        c.close *= scale;
+      }
       candleStore[symbol][tf] = candles;
-      // Открываем текущую свечу
+      // Открываем текущую свечу от цены тикера
       const curTs = Math.floor(now / ms) * ms;
-      openCandle[symbol][tf] = { ts: curTs, open: price, high: price, low: price, close: price, volume: 0 };
+      openCandle[symbol][tf] = { ts: curTs, open: targetPrice, high: targetPrice, low: targetPrice, close: targetPrice, volume: 0 };
     }
   }
 }

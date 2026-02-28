@@ -84,7 +84,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       } else {
         // Сервер отклонил — удаляем оптимистичный опцион и возвращаем USDT
         dispatch({ type: "REMOVE_BINARY", clientId });
-        // BALANCE_UPDATE придёт с сервера и синхронизирует баланс
+        // Показываем причину отказа
+        const reason = data.error || "Сервер отклонил сделку";
+        window.dispatchEvent(new CustomEvent("nexo:trade-rejected", { detail: reason }));
       }
       lastClientIdRef.current = null;
     },

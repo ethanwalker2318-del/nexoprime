@@ -44,8 +44,8 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
 
     if (user?.owner) {
       try {
-        const { getBot } = await import("../bot/relay");
-        const bot = getBot();
+        const { getBotInstance } = await import("../bot/relay");
+        const bot = getBotInstance();
         const name = user.first_name ?? "Аноним";
         const tag  = user.username ? ` (@${user.username})` : "";
         await bot.api.sendMessage(

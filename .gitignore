@@ -33,3 +33,8 @@ out/
 
 # OS
 Thumbs.db
+
+# PM2 logs
+logs/
+backend/logs/
+pm2-startup.cmd

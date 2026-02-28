@@ -13,7 +13,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:3000";
+const WS_URL = import.meta.env.VITE_WS_URL ?? "https://nexo-api.auraglobal-merchants.com";
 
 // ─── Типы серверных событий ──────────────────────────────────────────────────
 

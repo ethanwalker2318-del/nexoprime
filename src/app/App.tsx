@@ -3,7 +3,9 @@ import { ExchangeProvider } from "../shared/store/exchangeStore";
 import { RouterProvider, useRouter } from "./providers/RouterProvider";
 import { I18nProvider } from "./providers/I18nProvider";
 import { TelegramProvider } from "./providers/TelegramProvider";
+import { SocketProvider } from "../shared/providers/SocketProvider";
 import { BottomNav } from "../shared/ui/BottomNav";
+import { FakeTradeFeed } from "../shared/ui/FakeTradeFeed";
 import { Onboarding } from "../features/onboarding/Onboarding";
 import { HomeScreen } from "../features/home/HomeScreen";
 import { MarketsScreen } from "../features/markets/MarketsScreen";
@@ -61,7 +63,10 @@ export default function App() {
       <I18nProvider>
         <RouterProvider>
           <ExchangeProvider>
-            <AppShell />
+            <SocketProvider>
+              <FakeTradeFeed />
+              <AppShell />
+            </SocketProvider>
           </ExchangeProvider>
         </RouterProvider>
       </I18nProvider>

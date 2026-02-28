@@ -537,18 +537,16 @@ export function DashboardScreen() {
 function OnboardingScreen({ locale, telegramFirstName, onLocaleChange, onComplete }: OnboardingProps) {
   const { t } = useI18n();
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
   const [language, setLanguage] = useState<Locale>(locale);
   const [country, setCountry] = useState<CountryCode>("de");
 
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const isCodeValid = /^\d{6}$/.test(code);
-  const isPrimaryEnabled = step === 1 ? isEmailValid : step === 2 ? isCodeValid : true;
+  const isPrimaryEnabled = step === 1 ? isEmailValid : true;
 
-  const stepLabel = step === 1 ? t("onboarding.step.one") : step === 2 ? t("onboarding.step.two") : t("onboarding.step.three");
-  const actionLabel = step === 1 ? t("onboarding.continue") : step === 2 ? t("onboarding.verify") : t("onboarding.enter");
+  const stepLabel = step === 1 ? t("onboarding.step.one") : t("onboarding.step.two");
+  const actionLabel = step === 1 ? t("onboarding.continue") : t("onboarding.enter");
 
   return (
     <main className="dashboard-shell flex items-center justify-center px-4 py-10">
@@ -595,20 +593,6 @@ function OnboardingScreen({ locale, telegramFirstName, onLocaleChange, onComplet
               ) : null}
 
               {step === 2 ? (
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-textSecondary">{t("onboarding.code.label")}</span>
-                  <input
-                    inputMode="numeric"
-                    value={code}
-                    onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                    placeholder={t("onboarding.code.placeholder")}
-                    className="onboarding-input tracking-[0.3em]"
-                  />
-                  <span className="mt-2 block text-xs text-textSecondary">{t("onboarding.note")}</span>
-                </label>
-              ) : null}
-
-              {step === 3 ? (
                 <div className="space-y-4">
                   <div>
                     <p className="mb-2 text-sm font-medium text-textSecondary">{t("onboarding.language.label")}</p>
@@ -656,11 +640,6 @@ function OnboardingScreen({ locale, telegramFirstName, onLocaleChange, onComplet
           onClick={() => {
             if (step === 1) {
               setStep(2);
-              return;
-            }
-
-            if (step === 2) {
-              setStep(3);
               return;
             }
 

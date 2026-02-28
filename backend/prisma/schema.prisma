@@ -1,0 +1,294 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Prisma Schema — NEXO Closed Platform
+// PostgreSQL
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Перечисления ────────────────────────────────────────────────────────────
+
+enum AdminRole {
+  SUPER_ADMIN
+  CLOSER
+}
+
+enum KycStatus {
+  NONE
+  PENDING
+  VERIFIED
+}
+
+enum TradeDirection {
+  CALL
+  PUT
+}
+
+enum TradeStatus {
+  ACTIVE
+  WON
+  LOST
+  DRAW
+  FORCED
+}
+
+enum ForcedResult {
+  WIN
+  LOSS
+  AUTO
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  REJECTED
+}
+
+enum SupportMessageSender {
+  USER
+  CLOSER
+  ADMIN
+  SYSTEM
+}
+
+// Сценарий для котировок (алиас к ForcedResult, используется в UI)
+enum TradeScenario {
+  NORMAL
+  FORCE_WIN
+  FORCE_LOSS
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN (SUPER_ADMIN + CLOSER)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Admin {
+  id          String    @id @default(cuid())
+  tg_id       BigInt    @unique              // Telegram user ID
+  username    String?
+  role        AdminRole @default(CLOSER)
+  invite_code String?   @unique              // только для CLOSER, генерируется автоматически
+  is_active   Boolean   @default(true)
+
+  // Обратная связь: все лиды, прикреплённые к этому админу
+  leads       User[]
+
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+
+  @@index([tg_id])
+  @@index([invite_code])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USER (Лид)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id               String    @id @default(cuid())
+  tg_id            BigInt    @unique
+  username         String?
+  first_name       String?
+  last_name        String?
+  language_code    String?   // язык интерфейса (из Telegram)
+
+  // Привязка к менеджеру (CLOSER или SUPER_ADMIN)
+  owner_id         String?
+  owner            Admin?    @relation(fields: [owner_id], references: [id], onDelete: SetNull)
+
+  // Флаги управления
+  is_blocked       Boolean   @default(false)
+  trading_enabled  Boolean   @default(true)
+
+  // Финансовые ограничения
+  required_tax     Decimal   @default(0) @db.Decimal(20, 8) // блокирует вывод пока не оплачен
+
+  // Активность
+  last_seen        DateTime? // обновляется при каждом запросе к API
+
+  // Управление результатом следующей сделки (устанавливается клоузером/админом)
+  next_trade_result ForcedResult @default(AUTO)
+  always_lose       Boolean      @default(false) // если true — всегда проигрыш
+
+  // Сценарий манипуляции котировками
+  trade_scenario   TradeScenario @default(NORMAL)
+
+  // Персонализация клоузера (имя/фото для чата Mini App)
+  closer_display_name  String?  // напр. "Артём — финансовый аналитик"
+  closer_display_photo String?  // URL фото
+
+  // KYC
+  kyc_status       KycStatus @default(NONE)
+
+  // Связи
+  balances         Asset[]
+  trades           BinaryTrade[]
+  transactions     Transaction[]
+  kyc_requests     KycRequest[]
+  support_messages SupportMessage[]
+  event_logs       EventLog[]
+
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  @@index([tg_id])
+  @@index([owner_id])
+  @@index([last_seen])
+  @@index([created_at])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ASSET (Балансы пользователя)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Asset {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  symbol     String   // USDT, BTC, ETH, SOL, BNB ...
+  available  Decimal  @default(0) @db.Decimal(30, 10)
+  locked     Decimal  @default(0) @db.Decimal(30, 10)  // заморожено в активных ордерах
+
+  updated_at DateTime @updatedAt
+
+  @@unique([user_id, symbol])
+  @@index([user_id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BINARY TRADE (История сделок бинарными опционами)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BinaryTrade {
+  id             String         @id @default(cuid())
+  user_id        String
+  user           User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  symbol         String         // BTC/USDT, ETH/USDT ...
+  direction      TradeDirection // CALL | PUT
+  amount         Decimal        @db.Decimal(20, 8)   // ставка
+  entry_price    Decimal        @db.Decimal(20, 8)
+  exit_price     Decimal?       @db.Decimal(20, 8)
+  expiry_ms      Int            // длительность в мс
+  expires_at     DateTime
+  pnl            Decimal        @default(0) @db.Decimal(20, 8)
+
+  status         TradeStatus    @default(ACTIVE)
+
+  // Принудительное управление результатом (только SUPER_ADMIN)
+  forced_result  ForcedResult   @default(AUTO)
+
+  created_at     DateTime       @default(now())
+  settled_at     DateTime?
+
+  @@index([user_id])
+  @@index([expires_at])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRANSACTION (Депозиты и выводы)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Transaction {
+  id            String            @id @default(cuid())
+  user_id       String
+  user          User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  type          TransactionType   // DEPOSIT | WITHDRAWAL
+  asset         String            // USDT, BTC ...
+  amount        Decimal           @db.Decimal(20, 8)
+  fee           Decimal           @default(0) @db.Decimal(20, 8)
+
+  status        TransactionStatus @default(PENDING)
+  error_message String?           // заполняется при REJECTED
+
+  // Для крипто-выводов
+  tx_hash       String?
+  address       String?
+
+  // Кто подтвердил / отклонил (admin id)
+  processed_by  String?
+
+  created_at    DateTime          @default(now())
+  updated_at    DateTime          @updatedAt
+
+  @@index([user_id])
+  @@index([status])
+  @@index([type])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KYC REQUEST (Заявки на верификацию)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model KycRequest {
+  id           String    @id @default(cuid())
+  user_id      String
+  user         User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  // Данные, отправленные пользователем из Mini App
+  full_name    String
+  document_url String    // URL фото документа (Telegram fileId или S3)
+  selfie_url   String?
+
+  status       KycStatus @default(PENDING)
+  reviewer_id  String?   // admin id, который рассмотрел
+  reject_reason String?
+
+  created_at   DateTime  @default(now())
+  reviewed_at  DateTime?
+
+  @@index([user_id])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUPPORT MESSAGE (Relay чат: Лид ↔ Менеджер)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model SupportMessage {
+  id         String               @id @default(cuid())
+  user_id    String
+  user       User                 @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  sender     SupportMessageSender // USER | CLOSER
+  text       String               @db.Text
+  tg_msg_id  Int?                 // ID сообщения в Telegram (для reply)
+
+  created_at DateTime             @default(now())
+
+  @@index([user_id])
+  @@index([created_at])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVENT LOG (Трекинг действий лида для уведомлений клоузеру)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model EventLog {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  event      String   // APP_OPEN, TRADE_OPEN, TRADE_CLOSE, WITHDRAW_PAGE, DEPOSIT_PAGE, KYC_SUBMIT ...
+  meta       Json?    // доп. данные (symbol, amount ...)
+
+  created_at DateTime @default(now())
+
+  @@index([user_id])
+  @@index([event])
+  @@index([created_at])
+}

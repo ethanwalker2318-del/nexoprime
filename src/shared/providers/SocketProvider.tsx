@@ -1,0 +1,166 @@
+/**
+ * SocketProvider — React-контекст, соединяющий Socket.io сервер с UI.
+ *
+ * Обрабатывает:
+ *   - BALANCE_UPDATE → обновляет exchangeStore
+ *   - BINARY_RESULT  → отображает результат сделки
+ *   - FORCE_RELOAD   → location.reload()
+ *   - SHOW_MODAL     → открывает AdminModal
+ *   - UPDATE_KYC     → обновляет KYC-статус в сторе
+ *   - TICK_OVERRIDE  → инжектит импульсную свечу в mockEngine
+ *   - WITHDRAWAL_REJECTED → показывает scary-ошибку
+ *   - FORCE_LOGOUT   → очищает стор + reload
+ *   - NEW_SUPPORT_MESSAGE → всплывающее уведомление
+ */
+
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
+import {
+  useSocket,
+  type BalanceUpdatePayload,
+  type BinaryResultPayload,
+  type ShowModalPayload,
+  type TickOverridePayload,
+  type UpdateKycPayload,
+  type WithdrawalRejectedPayload,
+  type SupportMessagePayload,
+} from "../api/socket";
+import { useExchange } from "../store/exchangeStore";
+import { AdminModal, type AdminModalData } from "../ui/AdminModal";
+
+// ─── Контекст ────────────────────────────────────────────────────────────────
+
+interface SocketCtx {
+  connected: boolean;
+  emit: <T = unknown>(event: string, data?: T) => void;
+  placeBinary: (payload: {
+    symbol: string;
+    direction: "CALL" | "PUT";
+    amount: number;
+    entryPrice: number;
+    expiryMs: number;
+  }) => void;
+  logEvent: (event: string, meta?: Record<string, unknown>) => void;
+}
+
+const Ctx = createContext<SocketCtx | null>(null);
+
+// ─── Provider ────────────────────────────────────────────────────────────────
+
+export function SocketProvider({ children }: { children: React.ReactNode }) {
+  const { dispatch } = useExchange();
+  const [modalData, setModalData] = useState<AdminModalData | null>(null);
+  const closeModal = useCallback(() => setModalData(null), []);
+
+  // Храним последний TICK_OVERRIDE для потребителей
+  const tickOverrideRef = useRef<TickOverridePayload | null>(null);
+
+  const { connected, emit, placeBinary, logEvent } = useSocket({
+    // ── Баланс ──────────────────────────────────────────────────────────────
+    onBalanceUpdate(data: BalanceUpdatePayload) {
+      dispatch({
+        type: "UPDATE_ASSET",
+        symbol: data.symbol,
+        patch: { available: data.available },
+      });
+    },
+
+    // ── Результат бинарного трейда ──────────────────────────────────────────
+    onBinaryResult(data: BinaryResultPayload) {
+      // Settle через dispatch (closePrice берём из exitPrice)
+      dispatch({
+        type: "SETTLE_BINARY",
+        id: data.tradeId,
+        closePrice: data.exitPrice,
+      });
+    },
+
+    // ── Отклонение вывода ───────────────────────────────────────────────────
+    onWithdrawalRejected(data: WithdrawalRejectedPayload) {
+      setModalData({
+        title: "⚠️ Вывод отклонён",
+        text: data.reason || "Ваша заявка на вывод была отклонена службой безопасности. Обратитесь в поддержку для получения дополнительной информации.",
+        type: "error",
+        dismissable: true,
+      });
+      // Обновляем статус в сторе
+      dispatch({
+        type: "UPDATE_WITHDRAWAL",
+        id: data.txId,
+        patch: { status: "failed" },
+      });
+    },
+
+    // ── Сообщение поддержки ─────────────────────────────────────────────────
+    onSupportMessage(_data: SupportMessagePayload) {
+      // TODO: обновить чат-стор или показать push-уведомление
+    },
+
+    // ── Admin: принудительный reload ────────────────────────────────────────
+    onForceReload() {
+      window.location.reload();
+    },
+
+    // ── Admin: модальное окно ───────────────────────────────────────────────
+    onShowModal(data: ShowModalPayload) {
+      setModalData({
+        title: data.title,
+        text: data.text,
+        type: data.type ?? "info",
+        dismissable: true,
+      });
+    },
+
+    // ── Admin: обновить KYC ─────────────────────────────────────────────────
+    onUpdateKyc(_data: UpdateKycPayload) {
+      // Перезагружаем профиль — самый простой способ обновить KYC в сторе
+      window.dispatchEvent(new CustomEvent("nexo:kyc-updated", { detail: _data }));
+    },
+
+    // ── TICK_OVERRIDE: импульсная свеча ─────────────────────────────────────
+    onTickOverride(data: TickOverridePayload) {
+      tickOverrideRef.current = data;
+      // Диспатчим кастомное событие для mockEngine / TradeScreen
+      window.dispatchEvent(
+        new CustomEvent("nexo:tick-override", { detail: data })
+      );
+    },
+
+    // ── Принудительный выход ────────────────────────────────────────────────
+    onForceLogout() {
+      try { localStorage.clear(); } catch {}
+      window.location.reload();
+    },
+
+    onConnect() {
+      console.log("[Socket] Connected");
+    },
+
+    onDisconnect() {
+      console.log("[Socket] Disconnected");
+    },
+  });
+
+  // Логируем открытие приложения
+  useEffect(() => {
+    if (connected) {
+      logEvent("APP_OPEN", { ts: Date.now(), screen: "shell" });
+    }
+  }, [connected, logEvent]);
+
+  return (
+    <Ctx.Provider value={{ connected, emit, placeBinary, logEvent }}>
+      {children}
+      <AdminModal data={modalData} onClose={closeModal} />
+    </Ctx.Provider>
+  );
+}
+
+// ─── Hook ────────────────────────────────────────────────────────────────────
+
+export function useSocketCtx() {
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error("useSocketCtx requires SocketProvider");
+  return ctx;
+}
+
+export default SocketProvider;

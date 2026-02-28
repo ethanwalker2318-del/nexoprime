@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useExchange } from "../../shared/store/exchangeStore";
+import { useRouter } from "../../app/providers/RouterProvider";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 type Tab = "account" | "security" | "settings";
 
 export function ProfileScreen() {
   const { state, logout } = useExchange();
+  const { navigate } = useRouter();
   const [tab, setTab] = useState<Tab>("account");
   const [notif, setNotif] = useState(true);
   const [twoFA, setTwoFA] = useState(false);
@@ -298,13 +300,14 @@ export function ProfileScreen() {
                 border: "1px solid var(--line-1)", overflow: "hidden",
               }}>
                 {[
-                  { label: "Обратная связь", icon: "💬" },
-                  { label: "Центр помощи", icon: "❓" },
-                  { label: "Условия использования", icon: "📄" },
-                  { label: "Политика конфиденциальности", icon: "🔒" },
+                  { label: "Обратная связь", icon: "💬", action: () => navigate("support") },
+                  { label: "Центр помощи", icon: "❓", action: undefined },
+                  { label: "Условия использования", icon: "📄", action: undefined },
+                  { label: "Политика конфиденциальности", icon: "🔒", action: undefined },
                 ].map((item, i) => (
                   <button
                     key={item.label}
+                    onClick={item.action}
                     style={{
                       width: "100%", display: "flex", alignItems: "center", gap: 12,
                       padding: "13px 14px",

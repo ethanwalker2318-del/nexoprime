@@ -355,7 +355,7 @@ function setupBot(bot: Bot<BotCtx>): void {
         }
 
         // Сохраняем сообщение в лог
-        await prisma.supportMessage.create({
+        const savedMsg = await prisma.supportMessage.create({
           data: {
             user_id: lead.id,
             sender:  "CLOSER",
@@ -363,7 +363,18 @@ function setupBot(bot: Bot<BotCtx>): void {
           },
         });
 
-        // Отправляем лиду сообщение от имени бота
+        // Push через Socket.io → мини-апп (SupportChatScreen)
+        try {
+          const { emitToUser } = await import("../socket");
+          emitToUser(lead.id, "NEW_SUPPORT_MESSAGE", {
+            id:        savedMsg.id,
+            sender:    savedMsg.sender,
+            text:      savedMsg.text,
+            createdAt: savedMsg.created_at,
+          });
+        } catch (_) {}
+
+        // Отправляем лиду сообщение от имени бота (в TG)
         try {
           await bot.api.sendMessage(
             String(lead.tg_id),

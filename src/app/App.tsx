@@ -12,6 +12,7 @@ import { MarketsScreen } from "../features/markets/MarketsScreen";
 import { TradeScreen } from "../features/trade/TradeScreen";
 import { WalletScreen } from "../features/wallet/WalletScreen";
 import { ProfileScreen } from "../features/profile/ProfileScreen";
+import { SupportChatScreen } from "../features/support/SupportChatScreen";
 import { useExchange } from "../shared/store/exchangeStore";
 
 const SLIDE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -28,6 +29,7 @@ function AppShell() {
     trade:    <TradeScreen />,
     wallet:   <WalletScreen />,
     profile:  <ProfileScreen />,
+    support:  <SupportChatScreen />,
   };
 
   return (
@@ -52,7 +54,7 @@ function AppShell() {
           </motion.div>
         </AnimatePresence>
       </div>
-      <BottomNav />
+      {screen !== "support" && <BottomNav />}
     </div>
   );
 }

@@ -91,8 +91,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     },
 
     // ── Сообщение поддержки ─────────────────────────────────────────────────
-    onSupportMessage(_data: SupportMessagePayload) {
-      // TODO: обновить чат-стор или показать push-уведомление
+    onSupportMessage(data: SupportMessagePayload) {
+      // Пробрасываем через CustomEvent для SupportChatScreen
+      window.dispatchEvent(
+        new CustomEvent("nexo:support-message", { detail: data })
+      );
     },
 
     // ── Admin: принудительный reload ────────────────────────────────────────

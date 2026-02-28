@@ -164,6 +164,8 @@ type Action =
   | { type: "UPDATE_WITHDRAWAL"; id: string; patch: Partial<WithdrawRecord> }
   | { type: "CANCEL_ORDER";      id: string }
   | { type: "PLACE_BINARY";      option: BinaryOption }
+  | { type: "MAP_BINARY_ID";     clientId: string; serverId: string }
+  | { type: "REMOVE_BINARY";     clientId: string }
   | { type: "SETTLE_BINARY";     id: string; closePrice: number };
 
 function reducer(state: State, action: Action): State {
@@ -187,6 +189,19 @@ function reducer(state: State, action: Action): State {
     // ── Бинарные опционы ────────────────────────────────────────────────────
     case "PLACE_BINARY":
       return { ...state, binaryOptions: [action.option, ...state.binaryOptions] };
+
+    case "MAP_BINARY_ID": {
+      // Заменяем клиентский temp ID на серверный
+      const mapped = state.binaryOptions.map(o =>
+        o.id === action.clientId ? { ...o, id: action.serverId } : o
+      );
+      return { ...state, binaryOptions: mapped };
+    }
+
+    case "REMOVE_BINARY": {
+      // Удаляем опцион (при отклонении сервером)
+      return { ...state, binaryOptions: state.binaryOptions.filter(o => o.id !== action.clientId) };
+    }
 
     case "SETTLE_BINARY": {
       const opt = state.binaryOptions.find(o => o.id === action.id);

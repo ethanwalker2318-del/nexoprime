@@ -18,6 +18,7 @@ import {
   useSocket,
   type BalanceUpdatePayload,
   type BinaryResultPayload,
+  type BinaryPlacedPayload,
   type ShowModalPayload,
   type TickOverridePayload,
   type UpdateKycPayload,
@@ -54,12 +55,38 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   // Храним последний TICK_OVERRIDE для потребителей
   const tickOverrideRef = useRef<TickOverridePayload | null>(null);
 
+  // Храним маппинг clientId → serverId для бинарных опционов
+  const binaryIdMapRef = useRef<Map<number, string>>(new Map()); // seq → clientId
+  const lastClientIdRef = useRef<string | null>(null);
+
+  // Экспонируем ref для TradeScreen
+  useEffect(() => {
+    (window as any).__nexo_setLastBinaryClientId = (id: string) => { lastClientIdRef.current = id; };
+    return () => { delete (window as any).__nexo_setLastBinaryClientId; };
+  }, []);
+
   const { connected, emit, placeBinary, logEvent } = useSocket({
     // ── Баланс ──────────────────────────────────────────────────────────────
     onBalanceUpdate(data: BalanceUpdatePayload) {
       if (data.balances && Array.isArray(data.balances)) {
         dispatch({ type: "SYNC_BALANCES", balances: data.balances });
       }
+    },
+
+    // ── Подтверждение размещения бинарного опциона ───────────────────────────
+    onBinaryPlaced(data: BinaryPlacedPayload) {
+      const clientId = lastClientIdRef.current;
+      if (!clientId) return;
+
+      if (data.ok && data.tradeId) {
+        // Маппим клиентский ID на серверный
+        dispatch({ type: "MAP_BINARY_ID", clientId, serverId: data.tradeId });
+      } else {
+        // Сервер отклонил — удаляем оптимистичный опцион и возвращаем USDT
+        dispatch({ type: "REMOVE_BINARY", clientId });
+        // BALANCE_UPDATE придёт с сервера и синхронизирует баланс
+      }
+      lastClientIdRef.current = null;
     },
 
     // ── Результат бинарного трейда ──────────────────────────────────────────

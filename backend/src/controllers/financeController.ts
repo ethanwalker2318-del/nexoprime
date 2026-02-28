@@ -41,7 +41,7 @@ export async function confirmDepositCtrl(req: Request, res: Response): Promise<v
       return;
     }
 
-    const result = await confirmDeposit(txId, req.tgUser.id);
+    const result = await confirmDeposit(txId, req.tgAdmin!.id);
     if (!result.ok) {
       res.status(422).json(result);
       return;

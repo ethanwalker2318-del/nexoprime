@@ -495,6 +495,14 @@ export function TradeScreen() {
     if (usdtBal < s) { showToast(`Недостаточно USDT (${usdtBal.toFixed(2)})`, false); return; }
     const exp = EXPIRY_OPTIONS[expiryIdx]!;
 
+    // Генерируем клиентский ID для маппинга с серверным
+    const clientId = "bin_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+    // Сохраняем clientId чтобы SocketProvider смог смапить на серверный
+    if ((window as any).__nexo_setLastBinaryClientId) {
+      (window as any).__nexo_setLastBinaryClientId(clientId);
+    }
+
     // Отправляем трейд на сервер (финальный settlement придёт через BINARY_RESULT)
     serverPlaceBinary({
       symbol: pair,
@@ -509,7 +517,7 @@ export function TradeScreen() {
     dispatch({
       type: "PLACE_BINARY",
       option: {
-        id: "bin_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        id: clientId,
         symbol: pair,
         direction: direction === "call" ? "call" : "put",
         stake: s,

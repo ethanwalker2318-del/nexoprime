@@ -28,7 +28,7 @@ function fmtNum(n: number) {
 }
 
 export function WalletScreen() {
-  const { state, initiateDeposit, initiateWithdrawal } = useExchange();
+  const { state, initiateDeposit } = useExchange();
   const [tab, setTab] = useState<Tab>("balances");
   const [selAsset, setSelAsset] = useState("USDT");
   const [wdAddress, setWdAddress] = useState("");
@@ -80,15 +80,7 @@ export function WalletScreen() {
       })
       .catch((err: Error) => {
         setWdSubmitting(false);
-        // Fallback на локальный стор если сервер недоступен
-        const r = initiateWithdrawal(selAsset, amount, wdAddress.trim());
-        if (r.ok) {
-          setWdAddress(""); setWdAmount("");
-          showToast("Вывод инициирован");
-          setTab("history");
-        } else {
-          setWdError(err.message ?? r.error ?? "Ошибка");
-        }
+        setWdError(err.message ?? "Ошибка сервера. Попробуйте позже.");
       });
   }
 

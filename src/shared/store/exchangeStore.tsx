@@ -325,7 +325,7 @@ export function ExchangeProvider({ children }: { children: React.ReactNode }) {
             dispatch({ type: "SYNC_BALANCES", balances: profile.balances });
           }
         })
-        .catch(() => { /* silent — Telegram initData может отсутствовать в dev */ });
+        .catch((err) => { console.warn("[NEXO] getProfile failed:", err.message ?? err); });
     };
 
     fetchBalances();

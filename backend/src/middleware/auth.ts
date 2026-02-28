@@ -52,10 +52,10 @@ function verifyTelegramInitData(rawInitData: string, botToken: string): TgInitDa
 
   if (expectedHash !== hash) return null;
 
-  // Проверяем свежесть (не старше 1 час)
+  // Проверяем свежесть (не старше 24 часа — Mini App может быть открыт долго)
   const authDate  = parseInt(params.get("auth_date") ?? "0", 10);
   const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
-  if (ageSeconds > 3600) return null;
+  if (ageSeconds > 86400) return null;
 
   const userRaw = params.get("user");
   const user    = userRaw ? (JSON.parse(userRaw) as TgUser) : undefined;
@@ -141,7 +141,7 @@ async function findOrCreateUser(initData: TgInitData): Promise<User> {
 
 // ─── Middleware ────────────────────────────────────────────────────────────────
 
-export function tgAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
+export function tgAuthMiddleware(_req: Request, res: Response, next: NextFunction): void {
   const botToken = process.env.BOT_TOKEN;
   if (!botToken) {
     res.status(500).json({ error: "Server misconfiguration: BOT_TOKEN missing" });
@@ -149,15 +149,15 @@ export function tgAuthMiddleware(req: Request, res: Response, next: NextFunction
   }
 
   // initData передаётся в заголовке X-Telegram-Init-Data
-  const rawInitData = req.headers["x-telegram-init-data"] as string | undefined;
+  const rawInitData = _req.headers["x-telegram-init-data"] as string | undefined;
 
   // В режиме разработки — разрешаем dev-bypass через заголовок X-Dev-Tg-Id
   if (process.env.NODE_ENV === "development" && !rawInitData) {
-    const devTgId = req.headers["x-dev-tg-id"] as string | undefined;
+    const devTgId = _req.headers["x-dev-tg-id"] as string | undefined;
     if (devTgId) {
       prisma.user.findUnique({ where: { tg_id: BigInt(devTgId) } }).then(user => {
         if (!user) { res.status(404).json({ error: "Dev user not found" }); return; }
-        req.tgUser = user;
+        _req.tgUser = user;
         next();
       }).catch(next);
       return;
@@ -165,12 +165,14 @@ export function tgAuthMiddleware(req: Request, res: Response, next: NextFunction
   }
 
   if (!rawInitData) {
+    console.log("[AUTH] No initData in request", _req.method, _req.path);
     res.status(401).json({ error: "Missing Telegram initData" });
     return;
   }
 
   const initData = verifyTelegramInitData(rawInitData, botToken);
   if (!initData) {
+    console.log("[AUTH] Invalid/expired initData", _req.method, _req.path);
     res.status(401).json({ error: "Invalid or expired Telegram initData" });
     return;
   }
@@ -182,7 +184,7 @@ export function tgAuthMiddleware(req: Request, res: Response, next: NextFunction
         res.status(403).json({ error: "Account blocked" });
         return;
       }
-      req.tgUser = user;
+      _req.tgUser = user;
       next();
     })
     .catch(next);

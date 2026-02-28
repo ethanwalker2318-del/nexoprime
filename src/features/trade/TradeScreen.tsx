@@ -350,19 +350,6 @@ function ActiveOptionCard({ option, currentPrice, entryColor }: {
           </div>
         </div>
       </div>
-      <div style={{
-        marginTop: 7, display: "flex", justifyContent: "space-between", alignItems: "center",
-        background: winning ? "var(--pos-dim)" : "var(--neg-dim)",
-        border: `1px solid ${winning ? "var(--pos-border)" : "var(--neg-border)"}`,
-        borderRadius: "var(--r-sm)", padding: "4px 8px", fontSize: 10,
-      }}>
-        <span style={{ color: "var(--text-4)" }}>
-          {winning ? "Выплата при победе:" : "Потеря при поражении:"}
-        </span>
-        <span style={{ fontWeight: 700, color: winning ? "var(--pos)" : "var(--neg)", fontVariantNumeric: "tabular-nums" }}>
-          {winning ? `+$${(option.stake * PAYOUT_RATE).toFixed(2)} = $${winReturn.toFixed(2)}` : `-$${option.stake.toFixed(2)} = $0.00`}
-        </span>
-      </div>
     </div>
   );
 }
